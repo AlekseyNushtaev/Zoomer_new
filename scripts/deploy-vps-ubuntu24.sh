@@ -1,36 +1,28 @@
 #!/usr/bin/env bash
-# Полное развёртывание бота на Ubuntu 24.04 LTS: PostgreSQL, venv, зависимости, systemd.
+# Развёртывание бота zoomer на Ubuntu 24.04 LTS: PostgreSQL, venv, systemd.
+# Код и .env: /root/zoomer, сервис systemd: zoomer, запуск от root.
 #
-# На сервере (из корня репозитория):
-#   sudo bash scripts/deploy-vps-ubuntu24.sh
+# На сервере (репозиторий должен лежать в /root/zoomer):
+#   bash /root/zoomer/scripts/deploy-vps-ubuntu24.sh
 #
-# Переменные окружения (опционально), приоритет выше чем строки в .env:
-#   APP_USER       — системный пользователь (по умолчанию: zoomer)
-#   APP_DIR        — каталог с кодом (по умолчанию: родитель каталога scripts/)
-#   SERVICE_NAME   — имя unit в systemd (по умолчанию: zoomer-bot)
+# Переменные окружения (опционально), приоритет выше строк в .env:
+#   APP_DIR        — каталог приложения (по умолчанию: /root/zoomer)
+#   SERVICE_NAME   — имя unit (по умолчанию: zoomer)
 #   POSTGRES_USER, POSTGRES_DB, POSTGRES_HOST, POSTGRES_PORT, POSTGRES_PASSWORD
 #
 # Если переменные не заданы в окружении, скрипт читает их из ${APP_DIR}/.env (если файл есть),
-# иначе для user/db/host/port — значения по умолчанию (zoomer_bot, localhost, 5432),
-# для пароля — генерация и запись в новый/дополненный .env.
+# иначе для user/db/host/port — zoomer_bot, localhost, 5432; пароль при необходимости генерируется.
 #
-# Перед первым запуском отредактируйте .env в APP_DIR (TG_TOKEN, ADMIN_IDS, и т.д.).
-# Веб-API слушает WEB_API_PORT (по умолчанию 8080); при необходимости откройте порт в ufw.
+# Веб-API: WEB_API_PORT в .env (по умолчанию 8080); при необходимости откройте порт в ufw.
 
 set -euo pipefail
 
 [[ "${EUID}" -eq 0 ]] || { echo "Запустите от root: sudo bash $0" >&2; exit 1; }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEFAULT_APP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-
-APP_USER="${APP_USER:-zoomer}"
-APP_DIR="${APP_DIR:-$DEFAULT_APP_DIR}"
-SERVICE_NAME="${SERVICE_NAME:-zoomer-bot}"
+APP_DIR="${APP_DIR:-/root/zoomer}"
+SERVICE_NAME="${SERVICE_NAME:-zoomer}"
 ENV_FILE="${APP_DIR}/.env"
 
-# Значения БД: сначала переменные окружения при вызове sudo bash …,
-# иначе строки из .env, иначе значения ниже.
 POSTGRES_USER="${POSTGRES_USER:-}"
 POSTGRES_DB="${POSTGRES_DB:-}"
 POSTGRES_HOST="${POSTGRES_HOST:-}"
@@ -47,11 +39,11 @@ load_postgres_from_envfile() {
     val="${line#*=}"
     val="${val%$'\r'}"
     case "${key}" in
-      POSTGRES_USER)    [[ -z "${POSTGRES_USER}" ]] && POSTGRES_USER="${val}" ;;
+      POSTGRES_USER)     [[ -z "${POSTGRES_USER}" ]] && POSTGRES_USER="${val}" ;;
       POSTGRES_PASSWORD) [[ -z "${POSTGRES_PASSWORD}" ]] && POSTGRES_PASSWORD="${val}" ;;
-      POSTGRES_DB)      [[ -z "${POSTGRES_DB}" ]] && POSTGRES_DB="${val}" ;;
-      POSTGRES_HOST)    [[ -z "${POSTGRES_HOST}" ]] && POSTGRES_HOST="${val}" ;;
-      POSTGRES_PORT)    [[ -z "${POSTGRES_PORT}" ]] && POSTGRES_PORT="${val}" ;;
+      POSTGRES_DB)       [[ -z "${POSTGRES_DB}" ]] && POSTGRES_DB="${val}" ;;
+      POSTGRES_HOST)     [[ -z "${POSTGRES_HOST}" ]] && POSTGRES_HOST="${val}" ;;
+      POSTGRES_PORT)     [[ -z "${POSTGRES_PORT}" ]] && POSTGRES_PORT="${val}" ;;
     esac
   done <"${ENV_FILE}"
 }
@@ -86,22 +78,22 @@ require_cmd python3
 
 systemctl enable --now postgresql >/dev/null 2>&1 || systemctl start postgresql
 
-echo "[2/6] Пользователь ОС ${APP_USER}..."
-if ! id -u "${APP_USER}" >/dev/null 2>&1; then
-  adduser --system --group --home "${APP_DIR}" --no-create-home --shell /usr/sbin/nologin "${APP_USER}"
-fi
-
+echo "[2/6] Каталог приложения ${APP_DIR}..."
 mkdir -p "${APP_DIR}"
-[[ -f "${APP_DIR}/main.py" ]] || { echo "В ${APP_DIR} нет main.py — скопируйте репозиторий в APP_DIR или задайте APP_DIR=." >&2; exit 1; }
-[[ -f "${APP_DIR}/requirements.txt" ]] || { echo "В ${APP_DIR} нет requirements.txt." >&2; exit 1; }
-chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}"
+[[ -f "${APP_DIR}/main.py" ]] || {
+  echo "В ${APP_DIR} нет main.py — разместите проект zoomer в ${APP_DIR}." >&2
+  exit 1
+}
+[[ -f "${APP_DIR}/requirements.txt" ]] || {
+  echo "В ${APP_DIR} нет requirements.txt." >&2
+  exit 1
+}
 
 echo "[3/6] PostgreSQL: роль и база..."
 sudo -u postgres psql -v ON_ERROR_STOP=1 -qtAc "SELECT 1 FROM pg_roles WHERE rolname='${POSTGRES_USER}'" | grep -q 1 \
   || sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE ROLE \"${POSTGRES_USER}\" WITH LOGIN;"
 
 if [[ -z "${POSTGRES_PASSWORD:-}" ]]; then
-  # Только hex-символы — безопасно для shell и литерала в SQL
   POSTGRES_PASSWORD="$(openssl rand -hex 16)"
   echo "Сгенерирован POSTGRES_PASSWORD (будет в .env)."
 fi
@@ -114,7 +106,6 @@ sudo -u postgres psql -v ON_ERROR_STOP=1 -qtAc "SELECT 1 FROM pg_database WHERE 
 
 sudo -u postgres psql -v ON_ERROR_STOP=1 -c "GRANT ALL PRIVILEGES ON DATABASE \"${POSTGRES_DB}\" TO \"${POSTGRES_USER}\";"
 
-# Права на схему public (актуально для PG 15+)
 sudo -u postgres psql -v ON_ERROR_STOP=1 -d "${POSTGRES_DB}" -c "
   GRANT ALL ON SCHEMA public TO \"${POSTGRES_USER}\";
   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO \"${POSTGRES_USER}\";
@@ -137,19 +128,15 @@ TG_TOKEN=
 # Формат: 111, 222 (через запятую и пробел, как в config.py)
 ADMIN_IDS=
 
-# Пример обязательных для импорта config.py полей (подставьте свои значения)
 CHANEL_ID=0
 
 WEB_API_PORT=8080
 
 # Остальные переменные см. config.py / ваш рабочий .env
 EOF
-  chown "${APP_USER}:${APP_USER}" "${ENV_FILE}"
-  echo "Отредактируйте ${ENV_FILE} (TG_TOKEN, ADMIN_IDS, CHANEL_ID, ключи платежей и т.д.), затем:"
-  echo "  sudo systemctl restart ${SERVICE_NAME}"
+  echo "Отредактируйте ${ENV_FILE}, затем: systemctl restart ${SERVICE_NAME}"
 else
   echo "[4/6] ${ENV_FILE} уже есть — не перезаписываю."
-  # Дописываем пароль БД только если в .env нет POSTGRES_PASSWORD
   if ! grep -q '^POSTGRES_PASSWORD=' "${ENV_FILE}" 2>/dev/null; then
     {
       echo ""
@@ -160,41 +147,34 @@ else
       echo "POSTGRES_HOST=${POSTGRES_HOST}"
       echo "POSTGRES_PORT=${POSTGRES_PORT}"
     } >>"${ENV_FILE}"
-    chown "${APP_USER}:${APP_USER}" "${ENV_FILE}"
-    echo "В ${ENV_FILE} добавлены переменные Postgres (POSTGRES_PASSWORD был пуст)."
+    echo "В ${ENV_FILE} добавлены переменные Postgres."
   fi
 fi
 
 echo "[5/6] Python venv и зависимости..."
-sudo -u "${APP_USER}" bash <<EOSU
-set -euo pipefail
 cd "${APP_DIR}"
 python3 -m venv venv
 ./venv/bin/pip install --upgrade pip setuptools wheel -q
 ./venv/bin/pip install -r requirements.txt -q
-EOSU
 
 UNIT_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 echo "[6/6] systemd unit: ${UNIT_PATH}"
 
 cat >"${UNIT_PATH}" <<EOF
 [Unit]
-Description=Zoomer Telegram bot and web API
+Description=zoomer — Telegram bot and web API
 After=network-online.target postgresql.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=${APP_USER}
-Group=${APP_USER}
+User=root
+Group=root
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=-${ENV_FILE}
 ExecStart=${APP_DIR}/venv/bin/python ${APP_DIR}/main.py
 Restart=always
 RestartSec=10
-
-NoNewPrivileges=yes
-PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target
@@ -205,8 +185,8 @@ systemctl enable "${SERVICE_NAME}.service"
 
 if grep -q '^TG_TOKEN=$' "${ENV_FILE}" 2>/dev/null || ! grep -q '^TG_TOKEN=.' "${ENV_FILE}" 2>/dev/null; then
   echo ""
-  echo "Внимание: TG_TOKEN в .env пуст или отсутствует — сервис не запущен (упадёт при старте)."
-  echo "Заполните ${ENV_FILE}, затем: sudo systemctl start ${SERVICE_NAME}"
+  echo "Внимание: TG_TOKEN в .env пуст или отсутствует — сервис не запущен."
+  echo "Заполните ${ENV_FILE}, затем: systemctl start ${SERVICE_NAME}"
 else
   systemctl restart "${SERVICE_NAME}.service" || true
   sleep 1
