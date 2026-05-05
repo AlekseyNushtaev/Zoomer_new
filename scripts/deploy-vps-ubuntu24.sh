@@ -33,11 +33,20 @@ load_postgres_from_envfile() {
   [[ -f "${ENV_FILE}" ]] || return 0
   local key val line
   while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="${line//$'\xEF\xBB\xBF'/}"
     [[ "${line}" =~ ^[[:space:]]*# ]] && continue
     [[ "${line}" =~ ^POSTGRES_(USER|PASSWORD|DB|HOST|PORT)= ]] || continue
     key="${line%%=*}"
     val="${line#*=}"
     val="${val%$'\r'}"
+    # Снимаем обрамляющие кавычки в .env: PASSWORD="secret"
+    if [[ "${val}" =~ ^\".*\"$ ]]; then
+      val="${val#\"}"
+      val="${val%\"}"
+    elif [[ "${val}" =~ ^\'.*\'$ ]]; then
+      val="${val#\'}"
+      val="${val%\'}"
+    fi
     case "${key}" in
       POSTGRES_USER)     [[ -z "${POSTGRES_USER}" ]] && POSTGRES_USER="${val}" ;;
       POSTGRES_PASSWORD) [[ -z "${POSTGRES_PASSWORD}" ]] && POSTGRES_PASSWORD="${val}" ;;
@@ -48,12 +57,8 @@ load_postgres_from_envfile() {
   done <"${ENV_FILE}"
 }
 
+# Первичное чтение (если .env уже лежит в APP_DIR до установки пакетов)
 load_postgres_from_envfile
-
-POSTGRES_USER="${POSTGRES_USER:-zoomer_bot}"
-POSTGRES_DB="${POSTGRES_DB:-zoomer_bot}"
-POSTGRES_HOST="${POSTGRES_HOST:-localhost}"
-POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || { echo "Не найдена команда: $1" >&2; exit 1; }
@@ -89,6 +94,14 @@ mkdir -p "${APP_DIR}"
   exit 1
 }
 
+# Повторно подтянуть .env после проверки каталога (BOM/копирование во время apt)
+load_postgres_from_envfile
+
+POSTGRES_USER="${POSTGRES_USER:-zoomer_bot}"
+POSTGRES_DB="${POSTGRES_DB:-zoomer_bot}"
+POSTGRES_HOST="${POSTGRES_HOST:-localhost}"
+POSTGRES_PORT="${POSTGRES_PORT:-5432}"
+
 echo "[3/6] PostgreSQL: роль и база..."
 sudo -u postgres psql -v ON_ERROR_STOP=1 -qtAc "SELECT 1 FROM pg_roles WHERE rolname='${POSTGRES_USER}'" | grep -q 1 \
   || sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE ROLE \"${POSTGRES_USER}\" WITH LOGIN;"
@@ -98,8 +111,9 @@ if [[ -z "${POSTGRES_PASSWORD:-}" ]]; then
   echo "Сгенерирован POSTGRES_PASSWORD (будет в .env)."
 fi
 
+# Подстановка :'pwd' внутри двойных кавычек у -c часто не срабатывает в psql — см. документацию psql -c
 sudo -u postgres psql -v ON_ERROR_STOP=1 -v "pwd=${POSTGRES_PASSWORD}" \
-  -c "ALTER ROLE \"${POSTGRES_USER}\" WITH PASSWORD :'pwd';"
+  -c 'ALTER ROLE "'"${POSTGRES_USER}"'" WITH PASSWORD :'"'"'pwd'"'"';'
 
 sudo -u postgres psql -v ON_ERROR_STOP=1 -qtAc "SELECT 1 FROM pg_database WHERE datname='${POSTGRES_DB}'" | grep -q 1 \
   || sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${POSTGRES_DB}\" OWNER \"${POSTGRES_USER}\";"
