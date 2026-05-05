@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type
 
 import openpyxl
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import Message
 
@@ -36,6 +37,9 @@ from logging_config import logger
 router = Router()
 
 _WAITING_IMPORT_EXCEL: set[int] = set()
+
+# Лимит Telegram Bot API на скачивание файла ботом (getFile), не путать с лимитом отправки в чат.
+TELEGRAM_BOT_MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
 
 
 def _norm_header(h: Any) -> str:
@@ -386,7 +390,10 @@ async def import_excel_start(message: Message) -> None:
         "📥 Отправьте файл <b>.xlsx</b> (желательно из <code>/export_full</code>) "
         "<b>следующим сообщением</b>.\n\n"
         "⚠️ Все текущие данные в таблицах users, платежах, gifts, online, white_counter "
-        "будут <b>удалены</b> и заменены содержимым файла.\n"
+        "будут <b>удалены</b> и заменены содержимым файла.\n\n"
+        "📎 Через бота можно скачать файл до <b>20 МБ</b> (ограничение Telegram API). "
+        "Больше — залейте .xlsx на сервер и выполните:\n"
+        "<code>python scripts/import_export_xlsx.py /путь/к/файлу.xlsx</code>\n\n"
         "Отмена: <code>/import_excel_cancel</code>",
         parse_mode="HTML",
     )
@@ -417,6 +424,19 @@ async def import_excel_document(message: Message) -> None:
         await message.answer("Нужен файл .xlsx (Excel).")
         return
 
+    if doc.file_size is not None and doc.file_size > TELEGRAM_BOT_MAX_DOWNLOAD_BYTES:
+        _WAITING_IMPORT_EXCEL.discard(message.from_user.id)
+        await message.answer(
+            "❌ Файл больше <b>20 МБ</b> — Telegram не отдаёт такие файлы боту через API.\n\n"
+            "Скопируйте .xlsx на VPS (scp / WinSCP) и выполните на сервере из каталога проекта:\n"
+            "<code>python scripts/import_export_xlsx.py /полный/путь/к/файлу.xlsx</code>\n\n"
+            "Либо поднимите <a href=\"https://core.telegram.org/bots/api#using-a-local-bot-api-server\">локальный Bot API server</a> "
+            "и укажите его в клиенте бота — тогда лимит выше.",
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+        return
+
     _WAITING_IMPORT_EXCEL.discard(message.from_user.id)
     await message.answer("⏳ Загружаю и разбираю файл…")
 
@@ -430,6 +450,17 @@ async def import_excel_document(message: Message) -> None:
         body = "\n".join(f"{k}: {v}" for k, v in sorted(stats.items()))
         await message.answer("✅ Импорт завершён.\n" + body)
         logger.info("Админ %s импортировал Excel: %s", message.from_user.id, stats)
+    except TelegramBadRequest as e:
+        err = str(e).lower()
+        logger.exception("import_excel Telegram error")
+        if "too big" in err or "file is too large" in err:
+            await message.answer(
+                "❌ Telegram: файл слишком большой для скачивания ботом (лимит API ~20 МБ).\n\n"
+                "На сервере: <code>python scripts/import_export_xlsx.py /путь/к/export.xlsx</code>",
+                parse_mode="HTML",
+            )
+        else:
+            await message.answer(f"❌ Telegram: {e}")
     except Exception as e:
         logger.exception("import_excel failed")
         await message.answer(f"❌ Ошибка импорта: {e}")
