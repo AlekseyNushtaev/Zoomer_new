@@ -19,6 +19,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.exc import IntegrityError
 
 from bot import bot, sql, x3
+from lead_tracker import post_user_trial
 from config_bd.utils import _norm_email, user_row_to_api_dict
 from X3 import panel_username_for_site_user
 from config import (
@@ -676,6 +677,7 @@ async def trial_activate(ctx: JwtCtx):
             await sql.add_user(billing_uid, True)
 
         sub_url = await x3.sublink(panel_un)
+        await post_user_trial(billing_uid)
         return {
             "success": True,
             "expires": time_str,
@@ -704,6 +706,7 @@ async def trial_activate(ctx: JwtCtx):
         await sql.add_user(user_id, True)
 
     sub_url = await x3.sublink(str(user_id))
+    await post_user_trial(user_id)
     return {
         "success": True,
         "expires": time_str,

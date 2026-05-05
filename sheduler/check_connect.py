@@ -1,6 +1,7 @@
 import asyncio
 
 from bot import x3, sql
+from lead_tracker import post_user_connected
 from logging_config import logger
 
 
@@ -18,6 +19,7 @@ async def check_connect():
             if not user_data[5]:
                 try:
                     await sql.update_is_connect(user_id, True)
+                    await post_user_connected(user_id)
                     logger.info(f'{user_id} подключался к ВПН')
                     cnt += 1
                     await asyncio.sleep(0.05)

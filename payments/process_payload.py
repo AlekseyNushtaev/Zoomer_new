@@ -4,6 +4,7 @@ from typing import Optional, Tuple
 from bot import x3, sql, bot
 
 from config_bd.utils import _norm_email, _payload_duration_to_panel_days
+from lead_tracker import post_payment_success
 from X3 import panel_username_for_site_user
 from keyboard import create_kb, keyboard_sub_after_buy
 from lexicon import lexicon
@@ -136,6 +137,7 @@ async def process_confirmed_payment(payload):
             currency = ""
 
         if is_gift:
+            row_g = None
             if "@" in str(raw_uid):
                 row_g = await sql.get_user_by_email(_norm_email(str(raw_uid)))
                 if row_g is None:
@@ -146,6 +148,18 @@ async def process_confirmed_payment(payload):
                 giver_billing_id = int(raw_uid)
 
             gift_id = await sql.create_gift(giver_billing_id, duration, white_flag)
+            pay_tracker_uid: Optional[int] = None
+            if giver_billing_id > 0:
+                pay_tracker_uid = giver_billing_id
+            elif row_g is not None and len(row_g) > 27 and row_g[27] is not None:
+                try:
+                    lt = int(row_g[27])
+                    if lt > 0:
+                        pay_tracker_uid = lt
+                except (TypeError, ValueError):
+                    pass
+            if pay_tracker_uid is not None:
+                await post_payment_success(pay_tracker_uid, method, amount)
 
             marker = ' (тариф «Включи мобильный»)' if white_flag else ''
             gift_message = lexicon["payment_gift"].format(duration, marker, gift_id)
@@ -264,6 +278,12 @@ async def process_confirmed_payment(payload):
             await sql.update_reserve_field(db_uid)
             if secret_tariff and not is_gift:
                 await sql.update_field_bool_3(db_uid, True)
+
+            tracker_pay_uid = (
+                notify_tg if notify_tg is not None and notify_tg > 0 else (db_uid if db_uid > 0 else None)
+            )
+            if tracker_pay_uid is not None:
+                await post_payment_success(tracker_pay_uid, method, amount)
 
             if notify_tg is not None and notify_tg > 0:
                 try:

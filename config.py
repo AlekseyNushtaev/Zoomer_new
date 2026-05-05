@@ -17,6 +17,10 @@ WATA_API_SBP_KEY: Optional[str] = os.environ.get("WATA_API_SBP_KEY")
 WATA_API_CARD_KEY: Optional[str] = os.environ.get("WATA_API_CARD_KEY")
 # Боевой: https://api.wata.pro/api/h2h — песочница: https://api-sandbox.wata.pro/api/h2h
 WATA_API_BASE: str = os.environ.get("WATA_API_BASE", "https://api.wata.pro/api/h2h").rstrip("/")
+# Lead Tracker (POST /users/, /users/trial, /users/connected, /payments/)
+LEAD_TRACKER_BASE: Optional[str] = (os.environ.get("LEAD_TRACKER_BASE") or "").strip() or None
+LEAD_TRACKER_API_KEY: Optional[str] = (os.environ.get("LEAD_TRACKER_API_KEY") or "").strip() or None
+LEAD_TRACKER_STAR_RUB_PER_STAR: str = os.environ.get("LEAD_TRACKER_STAR_RUB_PER_STAR", "1.0")
 CHANEL_ID: Optional[int] = int(os.environ.get("CHANEL_ID"))
 CRYPTOBOT_API_TOKEN: Optional[str] = os.environ.get("CRYPTOBOT_API_TOKEN")
 PANEL_URL: Optional[str] = os.environ.get("PANEL_URL")
