@@ -22,7 +22,7 @@ def get_stars_amount(currency: str, duration: str) -> float:
             '90': 539,
             '120': 539,
             '180': 999,
-            '1000': 3490,
+            '5000': 3490,
             'white_30': 399,
             '30old': 99,
         }
