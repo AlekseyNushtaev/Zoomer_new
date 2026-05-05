@@ -188,15 +188,13 @@ class X3:
             vless_uuid = str(uuid.uuid1())
 
             if is_white:
-                squad_1 = ['41d180d4-4f4c-46d7-81f0-76f45356e777']
-                squad_2 = ['db73ace8-663b-4ef4-91da-0bfa7abe6e90']
-                squad = random.choice([squad_1, squad_2])
+                squad = ['627fc165-7598-4517-8baa-72e1a4e4be37']
                 traffic_limit_strategy = "MONTH"
                 traffic_limit_bytes = 80530636800
                 hwid_device_limit = 1
             else:
-                squad_1 = ['7c21ebc7-5463-449c-8e9c-44c0677380ab']
-                squad_2 = ['bc27ae8e-a5c2-4278-9af2-461623d5dd0d']
+                squad_1 = ['2a2236d1-517b-4015-b961-eae22d2ef7fe']
+                squad_2 = ['889e0d7a-cfa6-4bf9-b2ed-3cb7a1b44cbd']
                 squad = random.choice([squad_1, squad_2])
                 traffic_limit_strategy = "NO_RESET"
                 traffic_limit_bytes = 0
@@ -307,15 +305,13 @@ class X3:
             vless_uuid = str(uuid.uuid1())
 
             if 'white' in user_id_str:
-                squad_1 = ['41d180d4-4f4c-46d7-81f0-76f45356e777']
-                squad_2 = ['db73ace8-663b-4ef4-91da-0bfa7abe6e90']
-                squad = random.choice([squad_1, squad_2])
+                squad = ['627fc165-7598-4517-8baa-72e1a4e4be37']
                 trafficLimitStrategy = "MONTH"
                 trafficLimitBytes = 80530636800
                 hwidDeviceLimit = 1
             else:
-                squad_1 = ['7c21ebc7-5463-449c-8e9c-44c0677380ab']
-                squad_2 = ['bc27ae8e-a5c2-4278-9af2-461623d5dd0d']
+                squad_1 = ['2a2236d1-517b-4015-b961-eae22d2ef7fe']
+                squad_2 = ['889e0d7a-cfa6-4bf9-b2ed-3cb7a1b44cbd']
                 squad = random.choice([squad_1, squad_2])
                 trafficLimitStrategy = "NO_RESET"
                 trafficLimitBytes = 0
@@ -386,6 +382,64 @@ class X3:
 
         except Exception as e:
             logger.error(f"❌ Ошибка при добавлении клиента {user_id}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+
+    async def create_white_user_import_panel(
+        self,
+        user_id: int,
+        white_subscription: str,
+        white_subscription_end_date: datetime.datetime,
+    ) -> bool:
+        """POST /api/users для импорта white-клиента из БД (shortUuid и срок из полей white_*)."""
+        try:
+            current_time = datetime.datetime.utcnow()
+            expire_dt = white_subscription_end_date
+            if expire_dt.tzinfo is not None:
+                expire_dt = expire_dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+            expire_at = expire_dt.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+            created_at = current_time.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+            squad_white = ['627fc165-7598-4517-8baa-72e1a4e4be37']
+            data = {
+                "username": f"{user_id}_white",
+                "status": "ACTIVE",
+                "shortUuid": white_subscription.strip(),
+                "trojanPassword": self._generate_password(),
+                "vlessUuid": str(uuid.uuid1()),
+                "ssPassword": self._generate_password(),
+                "trafficLimitStrategy": "MONTH",
+                "trafficLimitBytes": 80530636800,
+                "expireAt": expire_at,
+                "createdAt": created_at,
+                "hwidDeviceLimit": 1,
+                "telegramId": int(user_id),
+                "description": "zoomer",
+                "activeInternalSquads": squad_white,
+            }
+            session = await self._get_session()
+            async with session.post(
+                    f"{self.target_url}/api/users",
+                    json=data,
+                    params=self.params,
+                    timeout=aiohttp.ClientTimeout(total=15)
+            ) as response:
+                if response.status in (200, 201):
+                    try:
+                        response_data = await response.json()
+                    except (aiohttp.ClientConnectionError, aiohttp.ContentTypeError, ValueError):
+                        logger.info(f"✅ import_panel_white: {user_id}_white создан (ответ без JSON)")
+                        return True
+                    if response_data.get("success", True):
+                        logger.info(f"✅ import_panel_white: {user_id}_white создан")
+                        return True
+                    logger.warning(f"❌ import_panel_white API: {response_data}")
+                    return False
+                error_text = await response.text() if response.content else "No body"
+                logger.error(f"❌ import_panel_white HTTP {response.status} {user_id}: {error_text}")
+                return False
+        except Exception as e:
+            logger.error(f"❌ import_panel_white {user_id}: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return False

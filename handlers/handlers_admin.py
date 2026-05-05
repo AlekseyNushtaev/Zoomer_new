@@ -98,17 +98,14 @@ _ADD7REG_USER_TEXT = (
 # Сквады обычной подписки (для /new): хотя бы один uuid в activeInternalSquads
 _NEW_PANEL_SQUAD_UUIDS = frozenset(
     {
-        "6ba41467-be68-438c-ad6e-5a02f7df826c",
-        "c6973051-58b7-484c-b669-6a123cda465b",
-        "a867561f-8736-4f67-8970-e20fddd00e5e",
-        "29b73cd8-8a68-41cd-99c7-5d30dbac4c71",
-        "d108d4a0-a121-4b52-baee-a97243208179",
+        "2a2236d1-517b-4015-b961-eae22d2ef7fe",
+        "889e0d7a-cfa6-4bf9-b2ed-3cb7a1b44cbd",
     }
 )
 
 _NEW_BULK_SQUAD_CHOICES = (
-    "7c21ebc7-5463-449c-8e9c-44c0677380ab",
-    "bc27ae8e-a5c2-4278-9af2-461623d5dd0d",
+    "2a2236d1-517b-4015-b961-eae22d2ef7fe",
+    "889e0d7a-cfa6-4bf9-b2ed-3cb7a1b44cbd",
 )
 _NEW_BULK_UUID_BATCH = 500
 
@@ -435,11 +432,8 @@ async def check_online(message: Message):
 
 @router.message(Command("balance_panel"))
 async def check_online(message: Message):
-    squad_1 = ['6ba41467-be68-438c-ad6e-5a02f7df826c']
-    squad_2 = ['c6973051-58b7-484c-b669-6a123cda465b']
-    squad_3 = ['a867561f-8736-4f67-8970-e20fddd00e5e']
-    squad_4 = ['29b73cd8-8a68-41cd-99c7-5d30dbac4c71']
-    squad_5 = ['d108d4a0-a121-4b52-baee-a97243208179']
+    squad_1 = ['2a2236d1-517b-4015-b961-eae22d2ef7fe']
+    squad_2 = ['889e0d7a-cfa6-4bf9-b2ed-3cb7a1b44cbd']
     success_count = 0
     fail_count = 0
     if message.from_user.id not in ADMIN_IDS:
@@ -448,7 +442,7 @@ async def check_online(message: Message):
     for user in users_x3:
         try:
             await asyncio.sleep(0.3)
-            random_squad = random.choice([squad_1, squad_2, squad_3, squad_4, squad_5])
+            random_squad = random.choice([squad_1, squad_2])
             username = user.get('username', '')
             if 'white' not in username and 'cascade-bridge-system' not in username:
                 uuid = user.get('uuid')
@@ -670,7 +664,7 @@ async def check_users_command(message: Message):
 
 @router.message(Command(commands=['new']))
 async def new_panel_users_command(message: Message):
-    """5 сквадов → 3 чанка → POST bulk/update-squads по порядку; сквад на каждый HTTP — random из двух."""
+    """2 сквада обычной подписки → 3 чанка → POST bulk/update-squads по порядку; сквад на каждый HTTP — random из двух."""
     if message.from_user.id not in ADMIN_IDS:
         return
 
@@ -680,7 +674,7 @@ async def new_panel_users_command(message: Message):
         if not users:
             empty_report = (
                 "/new: get_all_panel пуст\n"
-                "С 5 сквадами: 0\n"
+                "С 2 сквадами: 0\n"
                 "Чанк 1: 0\n"
                 "Чанк 2: 0\n"
                 "Чанк 3: 0"
@@ -724,15 +718,15 @@ async def new_panel_users_command(message: Message):
                     return True
             return False
 
-        # Шаг 1: из всей панели только те, у кого в activeInternalSquads есть один из 5 сквадов
-        with_five_squads = [u for u in users if has_allowed_squad(u)]
-        n_five = len(with_five_squads)
+        # Шаг 1: из всей панели только те, у кого в activeInternalSquads есть один из сквадов обычной подписки
+        with_allowed_squads = [u for u in users if has_allowed_squad(u)]
+        n_allowed = len(with_allowed_squads)
 
         # Шаг 2: разбиваем только этих пользователей на 3 чанка
         chunk1 = []
         chunk2 = []
         chunk3 = []
-        for u in with_five_squads:
+        for u in with_allowed_squads:
             if subscription_ok(u) and first_connected_at(u) is not None:
                 chunk1.append(u)
             elif subscription_ok(u) and first_connected_at(u) is None:
@@ -743,10 +737,10 @@ async def new_panel_users_command(message: Message):
         n1, n2, n3 = len(chunk1), len(chunk2), len(chunk3)
         report = (
             f"/new: в панели записей {total}\n"
-            f"С одним из 5 сквадов (activeInternalSquads): {n_five}\n"
+            f"С одним из сквадов обычной подписки (activeInternalSquads): {n_allowed}\n"
             f"Чанк 1 — подписка ≥ сегодня UTC, firstConnectedAt не None: {n1}\n"
             f"Чанк 2 — подписка ≥ сегодня UTC, firstConnectedAt None: {n2}\n"
-            f"Чанк 3 — остальные из этих {n_five}: {n3}"
+            f"Чанк 3 — остальные из этих {n_allowed}: {n3}"
         )
 
         async def bulk_apply_chunk(chunk: list, label: str) -> str:
@@ -862,6 +856,63 @@ async def shortuuid_export_command(message: Message):
 
     except Exception as e:
         logger.exception("Ошибка в /shortuuid_export")
+        await message.answer(f"❌ Ошибка: {str(e)}")
+
+
+@router.message(Command("import_panel_white"))
+async def import_panel_white_command(message: Message):
+    """Для всех с непустым white_subscription_end_date: создать white-клиента в панели из БД."""
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    await message.answer("🔄 Выбираю пользователей и создаю записи white в панели…")
+
+    try:
+        async with sql.session_factory() as session:
+            stmt = select(
+                Users.user_id,
+                Users.white_subscription_end_date,
+                Users.white_subscription,
+            ).where(Users.white_subscription_end_date.isnot(None))
+            result = await session.execute(stmt)
+            rows = result.all()
+
+        ok = 0
+        fail = 0
+        skipped_no_short = 0
+
+        for row in rows:
+            uid = int(row[0])
+            end_dt = row[1]
+            short_u = row[2]
+            if not (short_u or "").strip():
+                skipped_no_short += 1
+                continue
+            await asyncio.sleep(0.12)
+            if await x3.create_white_user_import_panel(uid, short_u, end_dt):
+                ok += 1
+            else:
+                fail += 1
+
+        report = (
+            f"✅ Готово.\n"
+            f"📋 В выборке (white_subscription_end_date не NULL): {len(rows)}\n"
+            f"✔ Создано в панели: {ok}\n"
+            f"❌ Ошибок: {fail}\n"
+            f"⏭ Пропущено (пустой white_subscription): {skipped_no_short}"
+        )
+        await message.answer(report)
+        logger.info(
+            "Админ %s /import_panel_white: выборка=%s ok=%s fail=%s skip_short=%s",
+            message.from_user.id,
+            len(rows),
+            ok,
+            fail,
+            skipped_no_short,
+        )
+
+    except Exception as e:
+        logger.exception("Ошибка в /import_panel_white")
         await message.answer(f"❌ Ошибка: {str(e)}")
 
 
