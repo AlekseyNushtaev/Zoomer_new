@@ -812,6 +812,12 @@ class AsyncSQL:
             await session.execute(stmt)
             await session.commit()
 
+    async def update_field_bool_2(self, user_id: int, value: bool):
+        async with self.session_factory() as session:
+            stmt = update(Users).where(Users.user_id == user_id).values(field_bool_2=value)
+            await session.execute(stmt)
+            await session.commit()
+
     async def update_field_bool_3(self, user_id: int, value: bool):
         async with self.session_factory() as session:
             stmt = update(Users).where(Users.user_id == user_id).values(field_bool_3=value)

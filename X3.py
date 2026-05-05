@@ -444,6 +444,68 @@ class X3:
             logger.error(traceback.format_exc())
             return False
 
+    async def create_regular_user_import_panel(
+        self,
+        user_id: int,
+        short_uuid: str,
+        subscription_end_date: datetime.datetime,
+    ) -> bool:
+        """POST /api/users: обычный клиент с активной подпиской из БД (shortUuid и срок из полей)."""
+        try:
+            current_time = datetime.datetime.utcnow()
+            expire_dt = subscription_end_date
+            if expire_dt.tzinfo is not None:
+                expire_dt = expire_dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+            expire_at = expire_dt.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+            created_at = current_time.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+
+            squad_1 = ['2a2236d1-517b-4015-b961-eae22d2ef7fe']
+            squad_2 = ['889e0d7a-cfa6-4bf9-b2ed-3cb7a1b44cbd']
+            squad = random.choice([squad_1, squad_2])
+
+            data = {
+                "username": str(user_id),
+                "status": "ACTIVE",
+                "shortUuid": short_uuid.strip(),
+                "trojanPassword": self._generate_password(),
+                "vlessUuid": str(uuid.uuid1()),
+                "ssPassword": self._generate_password(),
+                "trafficLimitStrategy": "NO_RESET",
+                "trafficLimitBytes": 0,
+                "expireAt": expire_at,
+                "createdAt": created_at,
+                "hwidDeviceLimit": 5,
+                "telegramId": int(user_id),
+                "description": "zoomer",
+                "activeInternalSquads": squad,
+            }
+            session = await self._get_session()
+            async with session.post(
+                    f"{self.target_url}/api/users",
+                    json=data,
+                    params=self.params,
+                    timeout=aiohttp.ClientTimeout(total=15)
+            ) as response:
+                if response.status in (200, 201):
+                    try:
+                        response_data = await response.json()
+                    except (aiohttp.ClientConnectionError, aiohttp.ContentTypeError, ValueError):
+                        logger.info(f"✅ import_panel_active: {user_id} создан (ответ без JSON)")
+                        return True
+                    if response_data.get("success", True):
+                        logger.info(f"✅ import_panel_active: {user_id} создан")
+                        return True
+                    logger.warning(f"❌ import_panel_active API: {response_data}")
+                    return False
+                error_text = await response.text() if response.content else "No body"
+                logger.error(f"❌ import_panel_active HTTP {response.status} {user_id}: {error_text}")
+                return False
+        except Exception as e:
+            logger.error(f"❌ import_panel_active {user_id}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+
     async def updateClient(self, day, user_id_str, user_id):
         """Обновляет клиента - добавляет дни к подписке"""
         try:
