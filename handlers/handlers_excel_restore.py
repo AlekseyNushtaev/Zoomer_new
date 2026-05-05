@@ -8,7 +8,7 @@ import asyncio
 import os
 import re
 import tempfile
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 import openpyxl
@@ -19,6 +19,7 @@ from aiogram.types import Message
 
 from bot import sql, x3
 from config import ADMIN_IDS
+from config_bd.utils import _naive_utc
 from config_bd.models import (
     Gifts,
     Online,
@@ -38,6 +39,7 @@ router = Router()
 
 _WAITING_IMPORT_EXCEL: set[int] = set()
 _WAITING_EXPORT_USERS: set[int] = set()
+_WAITING_IMPORT_PAYS: set[int] = set()
 
 # Лимит Telegram Bot API на скачивание файла ботом (getFile), не путать с лимитом отправки в чат.
 TELEGRAM_BOT_MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
@@ -425,6 +427,69 @@ def _parse_export_users_rows(path: str) -> Tuple[List[Tuple[int, datetime, Optio
         wb.close()
 
 
+def _casual_days_by_amount(amount: int) -> Optional[int]:
+    if amount == 99:
+        return 7
+    if amount in (149, 249):
+        return 30
+    if amount == 539:
+        return 90
+    if amount == 999:
+        return 180
+    return None
+
+
+def _parse_import_pays_rows(path: str) -> Tuple[List[Tuple[int, int]], int]:
+    """
+    Лист payments_sbp (как в /export) или первый лист.
+    Колонки: User ID / user_id, Amount / amount.
+    """
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    try:
+        sheet_map = {s.lower(): s for s in wb.sheetnames}
+        sheet_name = sheet_map.get("payments_sbp") or wb.sheetnames[0]
+        ws = wb[sheet_name]
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            return [], 0
+        headers = [h if h is None else str(h).strip() for h in rows[0]]
+        out: List[Tuple[int, int]] = []
+        skipped = 0
+        for r in rows[1:]:
+            if not any(c is not None and str(c).strip() != "" for c in r):
+                continue
+            raw = _row_to_dict(headers, tuple(r))
+            uid = _parse_bigint(
+                _cell_by_aliases(raw, "user_id", "User ID", "user id")
+            )
+            amt = _parse_int(_cell_by_aliases(raw, "amount", "Amount"))
+            if uid is None or amt is None:
+                skipped += 1
+                continue
+            out.append((uid, amt))
+        return out, skipped
+    finally:
+        wb.close()
+
+
+async def _flush_import_pays_log(message: Message, lines: List[str]) -> None:
+    if not lines:
+        return
+    chunk: List[str] = []
+    size = 0
+    max_chunk = 3800
+    for line in lines:
+        line_len = len(line) + 1
+        if chunk and size + line_len > max_chunk:
+            await message.answer("\n".join(chunk))
+            chunk = []
+            size = 0
+        chunk.append(line)
+        size += line_len
+    if chunk:
+        await message.answer("\n".join(chunk))
+
+
 @router.message(Command(commands=["import_excel"]))
 async def import_excel_start(message: Message) -> None:
     if not message.from_user or message.from_user.id not in ADMIN_IDS:
@@ -476,6 +541,31 @@ async def export_users_cancel(message: Message) -> None:
         return
     _WAITING_EXPORT_USERS.discard(message.from_user.id)
     await message.answer("Загрузка пользователей отменена.")
+
+
+@router.message(Command(commands=["import_pays"]))
+async def import_pays_start(message: Message) -> None:
+    if not message.from_user or message.from_user.id not in ADMIN_IDS:
+        await message.answer("❌ Команда только для администраторов.")
+        return
+    _WAITING_IMPORT_PAYS.add(message.from_user.id)
+    await message.answer(
+        "💳 Отправьте <b>.xlsx</b> с платежами (лист <code>payments_sbp</code> как в "
+        "<code>/export</code>): колонки <code>User ID</code>, <code>Amount</code>.\n\n"
+        "Обычные суммы: 99→+7д, 149/249→+30д, 539→+90д, 999→+180д; суммы <code>1</code> и "
+        "<code>399</code> обрабатываются отдельно (399 — white +30д).\n\n"
+        "📎 До <b>20 МБ</b>.\n\n"
+        "Отмена: <code>/import_pays_cancel</code>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command(commands=["import_pays_cancel"]))
+async def import_pays_cancel(message: Message) -> None:
+    if not message.from_user or message.from_user.id not in ADMIN_IDS:
+        return
+    _WAITING_IMPORT_PAYS.discard(message.from_user.id)
+    await message.answer("Обновление подписок по файлу отменено.")
 
 
 @router.message(
@@ -593,6 +683,144 @@ async def export_users_document(message: Message) -> None:
             await message.answer(f"❌ Telegram: {e}")
     except Exception as e:
         logger.exception("export_users failed")
+        await message.answer(f"❌ Ошибка: {e}")
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+@router.message(
+    F.document,
+    lambda m: bool(m.from_user and m.from_user.id in _WAITING_IMPORT_PAYS),
+)
+async def import_pays_document(message: Message) -> None:
+    if not message.from_user or message.from_user.id not in ADMIN_IDS:
+        _WAITING_IMPORT_PAYS.discard(message.from_user.id)
+        return
+
+    doc = message.document
+    if not doc or not doc.file_name:
+        await message.answer("Пришлите файл с расширением .xlsx")
+        return
+    if not doc.file_name.lower().endswith(".xlsx"):
+        await message.answer("Нужен файл .xlsx (Excel).")
+        return
+
+    if doc.file_size is not None and doc.file_size > TELEGRAM_BOT_MAX_DOWNLOAD_BYTES:
+        _WAITING_IMPORT_PAYS.discard(message.from_user.id)
+        await message.answer(
+            "❌ Файл больше <b>20 МБ</b>.",
+            parse_mode="HTML",
+        )
+        return
+
+    _WAITING_IMPORT_PAYS.discard(message.from_user.id)
+    await message.answer("⏳ Обрабатываю платежи и обновляю подписки…")
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    tmp_path = tmp.name
+    tmp.close()
+    try:
+        await message.bot.download(doc, destination=tmp_path)
+        rows, skipped_parse = await asyncio.to_thread(_parse_import_pays_rows, tmp_path)
+        now_naive = _naive_utc(datetime.now(timezone.utc))
+        log_lines: List[str] = []
+        casual_ok = 0
+        casual_unknown = 0
+        white_ok = 0
+        failed = 0
+
+        for uid, amount in rows:
+            if amount == 1 or amount == 399:
+                continue
+            user = await sql.get_user_object_by_user_id(uid)
+            if not user:
+                log_lines.append(f"⚠️ casual: нет user_id={uid} amount={amount}")
+                failed += 1
+                continue
+            days = _casual_days_by_amount(amount)
+            if days is None:
+                casual_unknown += 1
+                log_lines.append(f"⚠️ casual: неизвестная сумма user_id={uid} amount={amount}")
+                continue
+            try:
+                sub_end = user.subscription_end_date
+                if sub_end:
+                    new_end = sub_end + timedelta(days=days)
+                    note = "продление"
+                else:
+                    new_end = now_naive + timedelta(days=days)
+                    await sql.update_subscribtion(uid, x3.generate_client_id(uid))
+                    note = "с нуля + subscribtion"
+                await sql.update_subscription_end_date(uid, new_end)
+                casual_ok += 1
+                log_lines.append(
+                    f"✅ casual user_id={uid} amount={amount} +{days}d → "
+                    f"{new_end.strftime('%Y-%m-%d %H:%M')} ({note})"
+                )
+            except Exception as e:
+                failed += 1
+                logger.exception("import_pays casual user_id=%s", uid)
+                log_lines.append(f"❌ casual user_id={uid} amount={amount}: {e}")
+
+        for uid, amount in rows:
+            if amount != 399:
+                continue
+            user = await sql.get_user_object_by_user_id(uid)
+            if not user:
+                log_lines.append(f"⚠️ white: нет user_id={uid} amount=399")
+                failed += 1
+                continue
+            try:
+                we = user.white_subscription_end_date
+                if we:
+                    new_w = we + timedelta(days=30)
+                    note = "продление +30д"
+                else:
+                    new_w = now_naive + timedelta(days=30)
+                    await sql.update_white_subscription(uid, x3.generate_client_id(uid * 100))
+                    note = "с нуля + white_subscription"
+                await sql.update_white_subscription_end_date(uid, new_w)
+                white_ok += 1
+                log_lines.append(
+                    f"✅ white user_id={uid} amount=399 → "
+                    f"{new_w.strftime('%Y-%m-%d %H:%M')} ({note})"
+                )
+            except Exception as e:
+                failed += 1
+                logger.exception("import_pays white user_id=%s", uid)
+                log_lines.append(f"❌ white user_id={uid}: {e}")
+
+        await _flush_import_pays_log(message, log_lines)
+        await message.answer(
+            "📊 <b>Итог import_pays</b>\n"
+            f"Обычные тарифы применено: {casual_ok}\n"
+            f"White 399 применено: {white_ok}\n"
+            f"Строк без User ID/Amount: {skipped_parse}\n"
+            f"Неизвестная сумма (casual): {casual_unknown}\n"
+            f"Ошибок / нет пользователя: {failed}",
+            parse_mode="HTML",
+        )
+        logger.info(
+            "Админ %s import_pays: casual_ok=%s white_ok=%s skipped=%s unknown=%s failed=%s",
+            message.from_user.id,
+            casual_ok,
+            white_ok,
+            skipped_parse,
+            casual_unknown,
+            failed,
+        )
+    except TelegramBadRequest as e:
+        err = str(e).lower()
+        logger.exception("import_pays Telegram error")
+        if "too big" in err or "file is too large" in err:
+            await message.answer("❌ Файл слишком большой для скачивания ботом (~20 МБ).")
+        else:
+            await message.answer(f"❌ Telegram: {e}")
+    except Exception as e:
+        logger.exception("import_pays failed")
         await message.answer(f"❌ Ошибка: {e}")
     finally:
         try:
