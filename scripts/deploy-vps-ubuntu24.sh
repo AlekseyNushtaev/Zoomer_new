@@ -111,9 +111,21 @@ if [[ -z "${POSTGRES_PASSWORD:-}" ]]; then
   echo "Сгенерирован POSTGRES_PASSWORD (будет в .env)."
 fi
 
-# Подстановка :'pwd' внутри двойных кавычек у -c часто не срабатывает в psql — см. документацию psql -c
-sudo -u postgres psql -v ON_ERROR_STOP=1 -v "pwd=${POSTGRES_PASSWORD}" \
-  -c 'ALTER ROLE "'"${POSTGRES_USER}"'" WITH PASSWORD :'"'"'pwd'"'"';'
+# Не используем psql :'var' — на части окружений подстановка не срабатывает и уходит в сервер как буквальный «:».
+sudo -u postgres env PG_ROLE="${POSTGRES_USER}" PG_PASS="${POSTGRES_PASSWORD}" python3 <<'PY'
+import os, secrets, subprocess
+
+user = os.environ["PG_ROLE"]
+pwd = os.environ["PG_PASS"]
+ident = '"' + user.replace('"', '""') + '"'
+
+tag = "p" + secrets.token_hex(16)
+while f"${tag}$" in pwd:
+    tag = "p" + secrets.token_hex(16)
+
+sql = "ALTER ROLE " + ident + " WITH PASSWORD $" + tag + "$" + pwd + "$" + tag + "$;"
+subprocess.run(["psql", "-v", "ON_ERROR_STOP=1", "-c", sql], check=True)
+PY
 
 sudo -u postgres psql -v ON_ERROR_STOP=1 -qtAc "SELECT 1 FROM pg_database WHERE datname='${POSTGRES_DB}'" | grep -q 1 \
   || sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"${POSTGRES_DB}\" OWNER \"${POSTGRES_USER}\";"
