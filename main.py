@@ -16,7 +16,15 @@ from sheduler.check_online import check_online_daily
 from sheduler.check_platega import check_platega, check_platega_card, check_platega_crypto
 from sheduler.check_wata_sbp import check_wata_sbp
 from sheduler.check_wata_card import check_wata_card
-from handlers import handlers_user, handlers_statistic, handlers_admin, handlers_broadcast, handlers_export, handlers_import
+from handlers import (
+    handlers_user,
+    handlers_statistic,
+    handlers_admin,
+    handlers_broadcast,
+    handlers_export,
+    handlers_excel_restore,
+    handlers_import,
+)
 from sheduler.time_mes import send_message_cron
 from logging_config import logger
 from sheduler.time_mes_not_sub import send_push_cron
@@ -47,6 +55,7 @@ async def main() -> None:
     dp.include_router(handlers_import.router)
     dp.include_router(handlers_user.router)
     dp.include_router(handlers_export.router)
+    dp.include_router(handlers_excel_restore.router)
     dp.include_router(handlers_statistic.router)
     dp.include_router(pay_stars.router)
     # dp.include_router(pay_platega.router)

@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import select, update, delete, func, and_, or_, cast, Date
+from sqlalchemy import select, update, delete, func, and_, or_, cast, Date, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from datetime import datetime, date, timedelta, timezone
 from typing import Any, Optional, List, Tuple, Dict
@@ -2000,6 +2000,88 @@ class AsyncSQL:
             "gifts": gifts_list,
             "online": online_list,
             "white_counter": white_counter_list,
+        }
+
+    async def import_replace_all_from_export_workbook(
+        self,
+        *,
+        users: List[Users],
+        payments: List[Payments],
+        payments_cards: List[PaymentsCards],
+        payments_platega_crypto: List[PaymentsPlategaCrypto],
+        payments_stars: List[PaymentsStars],
+        payments_cryptobot: List[PaymentsCryptobot],
+        payments_wata_sbp: List[PaymentsWataSBP],
+        payments_wata_card: List[PaymentsWataCard],
+        gifts: List[Gifts],
+        online: List[Online],
+        white_counter: List[WhiteCounter],
+    ) -> Dict[str, int]:
+        """
+        Полная замена данных таблиц, которые попадают в /export_full: TRUNCATE … RESTART IDENTITY,
+        затем вставка списков ORM-объектов. Таблицы linking_codes / password_reset_codes не трогаются.
+        """
+        batch = 500
+
+        async with self.session_factory() as session:
+            async with session.begin():
+                await session.execute(
+                    text(
+                        "TRUNCATE TABLE payments, payments_cards, payments_platega_crypto, "
+                        "payments_stars, payments_cryptobot, payments_wata_sbp, payments_wata_card, "
+                        "gifts, online, white_counter, users RESTART IDENTITY CASCADE"
+                    )
+                )
+
+                def add_chunk(objs: List[Any]) -> None:
+                    for i in range(0, len(objs), batch):
+                        session.add_all(objs[i : i + batch])
+
+                add_chunk(users)
+                add_chunk(payments)
+                add_chunk(payments_cards)
+                add_chunk(payments_platega_crypto)
+                add_chunk(payments_stars)
+                add_chunk(payments_cryptobot)
+                add_chunk(payments_wata_sbp)
+                add_chunk(payments_wata_card)
+                add_chunk(gifts)
+                add_chunk(online)
+                add_chunk(white_counter)
+
+                await session.flush()
+
+                for tbl, col in (
+                    ("users", "id"),
+                    ("payments", "id"),
+                    ("payments_cards", "id"),
+                    ("payments_platega_crypto", "id"),
+                    ("payments_stars", "id"),
+                    ("payments_cryptobot", "id"),
+                    ("payments_wata_sbp", "id"),
+                    ("payments_wata_card", "id"),
+                    ("white_counter", "id"),
+                    ("online", "online_id"),
+                ):
+                    await session.execute(
+                        text(
+                            f"SELECT setval(pg_get_serial_sequence('{tbl}', '{col}'), "
+                            f"COALESCE((SELECT MAX(\"{col}\") FROM \"{tbl}\"), 1))"
+                        )
+                    )
+
+        return {
+            "users": len(users),
+            "payments": len(payments),
+            "payments_cards": len(payments_cards),
+            "payments_platega_crypto": len(payments_platega_crypto),
+            "payments_stars": len(payments_stars),
+            "payments_cryptobot": len(payments_cryptobot),
+            "payments_wata_sbp": len(payments_wata_sbp),
+            "payments_wata_card": len(payments_wata_card),
+            "gifts": len(gifts),
+            "online": len(online),
+            "white_counter": len(white_counter),
         }
 
     async def add_white_counter_if_not_exists(self, user_id: int) -> None:
