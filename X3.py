@@ -449,11 +449,17 @@ class X3:
         user_id: int,
         short_uuid: str,
         subscription_end_date: datetime.datetime,
+        *,
+        expire_at_override: datetime.datetime | None = None,
     ) -> bool:
-        """POST /api/users: обычный клиент с активной подпиской из БД (shortUuid и срок из полей)."""
+        """POST /api/users: обычный клиент с активной подпиской из БД (shortUuid и срок из полей).
+
+        Если задан expire_at_override — в панели expireAt берётся из него (например сейчас + 1 ч),
+        иначе из subscription_end_date.
+        """
         try:
             current_time = datetime.datetime.utcnow()
-            expire_dt = subscription_end_date
+            expire_dt = expire_at_override if expire_at_override is not None else subscription_end_date
             if expire_dt.tzinfo is not None:
                 expire_dt = expire_dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
             expire_at = expire_dt.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'

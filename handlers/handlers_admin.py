@@ -999,6 +999,93 @@ async def import_panel_active_command(message: Message):
         await message.answer(f"❌ Ошибка: {str(e)}")
 
 
+@router.message(Command("import_panel_all"))
+async def import_panel_all_command(message: Message):
+    """
+    Все с непустым subscription_end_date и field_bool_2=False:
+    при необходимости генерирует subscribtion, создаёт запись в панели (expireAt = UTC сейчас + 1 ч),
+    при успехе ставит field_bool_2.
+    """
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    try:
+        async with sql.session_factory() as session:
+            stmt = (
+                select(
+                    Users.user_id,
+                    Users.subscription_end_date,
+                    Users.subscribtion,
+                )
+                .where(
+                    Users.subscription_end_date.isnot(None),
+                    Users.field_bool_2.is_(False),
+                )
+                .order_by(Users.user_id)
+            )
+            result = await session.execute(stmt)
+            rows = result.all()
+
+        total = len(rows)
+        await message.answer(
+            f"🔄 import_panel_all: в выборке {total} пользователей\n"
+            f"(subscription_end_date не NULL, field_bool_2=false).\n"
+            f"Создаю в панели (expireAt = сейчас UTC + 1 ч)…"
+        )
+
+        ok = 0
+        fail = 0
+        generated_short = 0
+
+        for idx, row in enumerate(rows, start=1):
+            uid = int(row[0])
+            end_dt = row[1]
+            short_u = row[2]
+
+            if not (short_u or "").strip():
+                short_u = x3.generate_client_id(uid)
+                await sql.update_subscribtion(uid, short_u)
+                generated_short += 1
+
+            expire_override = datetime.utcnow() + timedelta(hours=1)
+
+            await asyncio.sleep(0.12)
+            if await x3.create_regular_user_import_panel(
+                uid, short_u, end_dt, expire_at_override=expire_override
+            ):
+                ok += 1
+                await sql.update_field_bool_2(uid, True)
+            else:
+                fail += 1
+
+            if idx % 1000 == 0:
+                await message.answer(
+                    f"📊 import_panel_all: обработано {idx} / {total}\n"
+                    f"✔ ок: {ok}, ❌ ошибок: {fail}, shortUuid сгенерировано: {generated_short}"
+                )
+
+        report = (
+            f"✅ Готово.\n"
+            f"📋 В выборке: {total}\n"
+            f"✔ Создано в панели: {ok}\n"
+            f"❌ Ошибок: {fail}\n"
+            f"🆕 Сгенерировано subscribtion: {generated_short}"
+        )
+        await message.answer(report)
+        logger.info(
+            "Админ %s /import_panel_all: выборка=%s ok=%s fail=%s gen_short=%s",
+            message.from_user.id,
+            total,
+            ok,
+            fail,
+            generated_short,
+        )
+
+    except Exception as e:
+        logger.exception("Ошибка в /import_panel_all")
+        await message.answer(f"❌ Ошибка: {str(e)}")
+
+
 @router.message(Command(commands=['update_delete']))
 async def check_users_command(message: Message):
     """Проверка соответствия дат окончания подписки у оплаченных пользователей (reserve_field=True)"""
