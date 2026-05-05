@@ -884,6 +884,24 @@ async def reset_field_bool_3_all_command(message: Message):
     logger.info(f"Админ {message.from_user.id}: сброс field_bool_3 для всех, обновлено строк: {n}")
 
 
+@router.message(Command(commands=['add_2d']))
+async def add_2d_command(message: Message):
+    """Всем с непустыми датами: +2 дня к subscription_end_date и white_subscription_end_date."""
+    if not message.from_user or message.from_user.id not in ADMIN_IDS:
+        return
+    n_sub, n_white = await sql.bulk_add_2_days_to_subscription_dates()
+    await message.answer(
+        f"Готово: +2 дня к subscription_end_date — {n_sub} строк; "
+        f"+2 дня к white_subscription_end_date — {n_white} строк."
+    )
+    logger.info(
+        "Админ %s: /add_2d subscription_end_date=%s white_subscription_end_date=%s",
+        message.from_user.id,
+        n_sub,
+        n_white,
+    )
+
+
 # @router.message(Command(commands=['add_7_to_connected']))
 # async def add_7_to_connected_command(message: Message):
 #     """

@@ -825,6 +825,28 @@ class AsyncSQL:
             await session.commit()
             return int(result.rowcount or 0)
 
+    async def bulk_add_2_days_to_subscription_dates(self) -> Tuple[int, int]:
+        """
+        Добавляет 2 дня ко всем непустым subscription_end_date и white_subscription_end_date.
+        Возвращает (число строк с обновлённой обычной датой, число строк с обновлённой white-датой).
+        """
+        async with self.session_factory() as session:
+            r1 = await session.execute(
+                text(
+                    "UPDATE users SET subscription_end_date = subscription_end_date + interval '2 days' "
+                    "WHERE subscription_end_date IS NOT NULL"
+                )
+            )
+            r2 = await session.execute(
+                text(
+                    "UPDATE users SET white_subscription_end_date = "
+                    "white_subscription_end_date + interval '2 days' "
+                    "WHERE white_subscription_end_date IS NOT NULL"
+                )
+            )
+            await session.commit()
+            return (int(r1.rowcount or 0), int(r2.rowcount or 0))
+
     async def get_last_notification_date(self, user_id: int) -> Optional[date]:
         async with self.session_factory() as session:
             stmt = select(Users.last_notification_date).where(Users.user_id == user_id)
