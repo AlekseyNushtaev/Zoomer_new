@@ -8,7 +8,7 @@ import asyncio
 import os
 import re
 import tempfile
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 import openpyxl
@@ -17,7 +17,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from bot import sql
+from bot import sql, x3
 from config import ADMIN_IDS
 from config_bd.models import (
     Gifts,
@@ -37,6 +37,7 @@ from logging_config import logger
 router = Router()
 
 _WAITING_IMPORT_EXCEL: set[int] = set()
+_WAITING_EXPORT_USERS: set[int] = set()
 
 # Лимит Telegram Bot API на скачивание файла ботом (getFile), не путать с лимитом отправки в чат.
 TELEGRAM_BOT_MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
@@ -380,6 +381,50 @@ def _parse_workbook(path: str) -> Dict[str, List[Any]]:
     return out
 
 
+def _cell_by_aliases(row: Dict[str, Any], *aliases: str) -> Any:
+    norm_map = {_norm_header(k): v for k, v in row.items() if k is not None}
+    for a in aliases:
+        na = _norm_header(a)
+        if na in norm_map:
+            return norm_map[na]
+        if a in row:
+            return row[a]
+    return None
+
+
+def _parse_export_users_rows(path: str) -> Tuple[List[Tuple[int, datetime, Optional[datetime], Optional[datetime]]], int]:
+    """
+    Лист users или первый лист: колонки user_id, created_at (или create_user), trial_at, connected_at.
+    Возвращает список строк и число пропущенных (нет user_id или даты создания).
+    """
+    wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+    try:
+        sheet_map = {s.lower(): s for s in wb.sheetnames}
+        sheet_name = sheet_map.get("users") or wb.sheetnames[0]
+        ws = wb[sheet_name]
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            return [], 0
+        headers = [h if h is None else str(h).strip() for h in rows[0]]
+        out: List[Tuple[int, datetime, Optional[datetime], Optional[datetime]]] = []
+        skipped = 0
+        for r in rows[1:]:
+            if not any(c is not None and str(c).strip() != "" for c in r):
+                continue
+            raw = _row_to_dict(headers, tuple(r))
+            uid = _parse_bigint(_cell_by_aliases(raw, "user_id"))
+            created = _parse_datetime(_cell_by_aliases(raw, "created_at", "create_user"))
+            trial = _parse_datetime(_cell_by_aliases(raw, "trial_at"))
+            conn = _parse_datetime(_cell_by_aliases(raw, "connected_at"))
+            if uid is None or created is None:
+                skipped += 1
+                continue
+            out.append((uid, created, trial, conn))
+        return out, skipped
+    finally:
+        wb.close()
+
+
 @router.message(Command(commands=["import_excel"]))
 async def import_excel_start(message: Message) -> None:
     if not message.from_user or message.from_user.id not in ADMIN_IDS:
@@ -405,6 +450,155 @@ async def import_excel_cancel(message: Message) -> None:
         return
     _WAITING_IMPORT_EXCEL.discard(message.from_user.id)
     await message.answer("Импорт отменён (ожидание файла сброшено).")
+
+
+@router.message(Command(commands=["export_users"]))
+async def export_users_start(message: Message) -> None:
+    """Импорт пользователей из .xlsx в БД (команда названа по ТЗ)."""
+    if not message.from_user or message.from_user.id not in ADMIN_IDS:
+        await message.answer("❌ Команда только для администраторов.")
+        return
+    _WAITING_EXPORT_USERS.add(message.from_user.id)
+    await message.answer(
+        "📥 Отправьте файл <b>.xlsx</b> со столбцами:\n"
+        "<code>user_id</code>, <code>created_at</code> (или <code>create_user</code>), "
+        "<code>trial_at</code>, <code>connected_at</code>\n\n"
+        "Строки без <code>user_id</code> или даты создания будут пропущены.\n\n"
+        "📎 До <b>20 МБ</b> (лимит Telegram API).\n\n"
+        "Отмена: <code>/export_users_cancel</code>",
+        parse_mode="HTML",
+    )
+
+
+@router.message(Command(commands=["export_users_cancel"]))
+async def export_users_cancel(message: Message) -> None:
+    if not message.from_user or message.from_user.id not in ADMIN_IDS:
+        return
+    _WAITING_EXPORT_USERS.discard(message.from_user.id)
+    await message.answer("Загрузка пользователей отменена.")
+
+
+@router.message(
+    F.document,
+    lambda m: bool(m.from_user and m.from_user.id in _WAITING_EXPORT_USERS),
+)
+async def export_users_document(message: Message) -> None:
+    if not message.from_user or message.from_user.id not in ADMIN_IDS:
+        _WAITING_EXPORT_USERS.discard(message.from_user.id)
+        return
+
+    doc = message.document
+    if not doc or not doc.file_name:
+        await message.answer("Пришлите файл с расширением .xlsx")
+        return
+    if not doc.file_name.lower().endswith(".xlsx"):
+        await message.answer("Нужен файл .xlsx (Excel).")
+        return
+
+    if doc.file_size is not None and doc.file_size > TELEGRAM_BOT_MAX_DOWNLOAD_BYTES:
+        _WAITING_EXPORT_USERS.discard(message.from_user.id)
+        await message.answer(
+            "❌ Файл больше <b>20 МБ</b>.\n"
+            "Скопируйте .xlsx на сервер и выполните импорт локально или разбейте файл.",
+            parse_mode="HTML",
+        )
+        return
+
+    _WAITING_EXPORT_USERS.discard(message.from_user.id)
+    await message.answer("⏳ Загружаю и записываю пользователей…")
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    tmp_path = tmp.name
+    tmp.close()
+    try:
+        await message.bot.download(doc, destination=tmp_path)
+        rows, skipped_parse = await asyncio.to_thread(_parse_export_users_rows, tmp_path)
+        ok = 0
+        failed = 0
+        for uid, created, trial_at, connected_at in rows:
+            try:
+                has_trial = trial_at is not None
+                has_connected = connected_at is not None
+                if not has_trial and not has_connected:
+                    await sql.upsert_user_from_export_users_xlsx(
+                        uid,
+                        created,
+                        in_panel=False,
+                        is_connect=False,
+                        subscription_end_date=None,
+                        subscribtion=None,
+                    )
+                elif has_trial and not has_connected:
+                    sub = x3.generate_client_id(uid)
+                    end_dt = created + timedelta(days=7)
+                    await sql.upsert_user_from_export_users_xlsx(
+                        uid,
+                        created,
+                        in_panel=True,
+                        is_connect=False,
+                        subscription_end_date=end_dt,
+                        subscribtion=sub,
+                    )
+                elif has_trial and has_connected:
+                    sub = x3.generate_client_id(uid)
+                    end_dt = created + timedelta(days=7)
+                    await sql.upsert_user_from_export_users_xlsx(
+                        uid,
+                        created,
+                        in_panel=True,
+                        is_connect=True,
+                        subscription_end_date=end_dt,
+                        subscribtion=sub,
+                    )
+                else:
+                    # connected_at задан, trial_at пуст — считаем как подключённого с триалом
+                    sub = x3.generate_client_id(uid)
+                    end_dt = created + timedelta(days=7)
+                    await sql.upsert_user_from_export_users_xlsx(
+                        uid,
+                        created,
+                        in_panel=True,
+                        is_connect=True,
+                        subscription_end_date=end_dt,
+                        subscribtion=sub,
+                    )
+                ok += 1
+            except Exception:
+                failed += 1
+                logger.exception("export_users row user_id=%s", uid)
+
+        await message.answer(
+            "✅ Готово.\n"
+            f"Записано строк: <b>{ok}</b>\n"
+            f"Ошибок при записи: <b>{failed}</b>\n"
+            f"Пропущено при разборе (нет user_id или даты): <b>{skipped_parse}</b>",
+            parse_mode="HTML",
+        )
+        logger.info(
+            "Админ %s import export_users: ok=%s failed=%s skipped=%s",
+            message.from_user.id,
+            ok,
+            failed,
+            skipped_parse,
+        )
+    except TelegramBadRequest as e:
+        err = str(e).lower()
+        logger.exception("export_users Telegram error")
+        if "too big" in err or "file is too large" in err:
+            await message.answer(
+                "❌ Telegram: файл слишком большой для скачивания ботом (~20 МБ).",
+                parse_mode="HTML",
+            )
+        else:
+            await message.answer(f"❌ Telegram: {e}")
+    except Exception as e:
+        logger.exception("export_users failed")
+        await message.answer(f"❌ Ошибка: {e}")
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
 
 
 @router.message(

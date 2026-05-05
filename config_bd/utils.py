@@ -624,6 +624,67 @@ class AsyncSQL:
                 logger.error(f"Error inserting user {user_id}: {e}")
                 return False
 
+    async def upsert_user_from_export_users_xlsx(
+        self,
+        user_id: int,
+        create_user: datetime,
+        *,
+        in_panel: bool,
+        is_connect: bool,
+        subscription_end_date: Optional[datetime],
+        subscribtion: Optional[str],
+    ) -> None:
+        """
+        Вставка или обновление пользователя по строке импорта /export_users (.xlsx).
+        Поля вне сценария импорта у существующей строки не трогаются.
+        """
+        cu = _naive_utc(create_user)
+        sub_end = _naive_utc(subscription_end_date) if subscription_end_date else None
+
+        async with self.session_factory() as session:
+            result = await session.execute(select(Users).where(Users.user_id == user_id))
+            row = result.scalar_one_or_none()
+            if row:
+                row.create_user = cu
+                row.in_panel = in_panel
+                row.is_connect = is_connect
+                row.subscription_end_date = sub_end
+                row.subscribtion = subscribtion
+            else:
+                session.add(
+                    Users(
+                        user_id=user_id,
+                        create_user=cu,
+                        in_panel=in_panel,
+                        is_connect=is_connect,
+                        subscription_end_date=sub_end,
+                        subscribtion=subscribtion,
+                        stamp="",
+                        ref=None,
+                        is_delete=False,
+                        in_chanel=False,
+                        reserve_field=False,
+                        white_subscription_end_date=None,
+                        white_subscription=None,
+                        last_notification_date=None,
+                        last_broadcast_status=None,
+                        last_broadcast_date=None,
+                        ttclid=None,
+                        email=None,
+                        password=None,
+                        password_hash=None,
+                        linked_telegram_id=None,
+                        activation_pass=None,
+                        field_str_1=None,
+                        field_str_2=None,
+                        field_str_3=None,
+                        field_bool_1=False,
+                        field_bool_2=False,
+                        field_bool_3=False,
+                    )
+                )
+            await session.commit()
+
     async def update_in_panel(self, user_id: int):
         async with self.session_factory() as session:
             stmt = update(Users).where(Users.user_id == user_id).values(in_panel=True)
@@ -1977,7 +2038,9 @@ class AsyncSQL:
         Меньше открытий соединения, чем несколько отдельных get_all_*.
         """
         async with self.session_factory() as session:
-            users_list = (await session.execute(select(Users))).scalars().all()
+            users_list = (
+                await session.execute(select(Users).order_by(Users.create_user.asc()))
+            ).scalars().all()
             payments_list = (await session.execute(select(Payments))).scalars().all()
             payments_cards_list = (await session.execute(select(PaymentsCards))).scalars().all()
             payments_platega_crypto_list = (await session.execute(select(PaymentsPlategaCrypto))).scalars().all()
