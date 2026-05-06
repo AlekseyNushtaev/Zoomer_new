@@ -134,6 +134,23 @@ class PaymentsWataCard(Base):
     payload = Column(String, nullable=True)
 
 
+class PaymentsFkSBP(Base):
+    __tablename__ = 'payments_fk_sbp'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, nullable=False)
+    amount = Column(Integer, nullable=False)
+    time_created = Column(DateTime, default=datetime.now)
+    is_gift = Column(Boolean, default=False)
+    status = Column(String, nullable=True)
+    transaction_id = Column(String, nullable=True)
+    fk_order_id = Column(Integer, nullable=True)
+    payload = Column(String, nullable=True)
+    nonce = Column(BigInteger, nullable=False)
+    signature = Column(String, nullable=True)
+    method = Column(String, nullable=False, default='fksbp')
+
+
 class PaymentsStars(Base):
     __tablename__ = 'payments_stars'
 

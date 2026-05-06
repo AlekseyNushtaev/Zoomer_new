@@ -26,6 +26,7 @@ from config_bd.models import (
     Payments,
     PaymentsCards,
     PaymentsCryptobot,
+    PaymentsFkSBP,
     PaymentsPlategaCrypto,
     PaymentsStars,
     PaymentsWataCard,
@@ -227,6 +228,10 @@ def _map_payment_row(headers: List[Any], row: Tuple[Any, ...], model: Type) -> D
         "payload": "payload",
         "currency": "currency",
         "invoice_id": "invoice_id",
+        "fk_order_id": "fk_order_id",
+        "nonce": "nonce",
+        "signature": "signature",
+        "method": "method",
     }
     out: Dict[str, Any] = {}
     for nk, attr in aliases.items():
@@ -283,6 +288,7 @@ def _parse_workbook(path: str) -> Dict[str, List[Any]]:
         "payments_cryptobot": [],
         "payments_wata_sbp": [],
         "payments_wata_card": [],
+        "payments_fk_sbp": [],
         "gifts": [],
         "online": [],
         "white_counter": [],
@@ -327,6 +333,7 @@ def _parse_workbook(path: str) -> Dict[str, List[Any]]:
     load_payments("payments_cryptobot", PaymentsCryptobot, "payments_cryptobot")
     load_payments("payments_wata_sbp", PaymentsWataSBP, "payments_wata_sbp")
     load_payments("payments_wata_card", PaymentsWataCard, "payments_wata_card")
+    load_payments("payments_fk_sbp", PaymentsFkSBP, "payments_fk_sbp")
 
     if get("gifts"):
         ws = wb[get("gifts")]

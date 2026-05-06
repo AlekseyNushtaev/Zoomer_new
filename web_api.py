@@ -24,22 +24,22 @@ from config_bd.utils import _norm_email, user_row_to_api_dict
 from X3 import panel_username_for_site_user
 from config import (
     ADMIN_IDS,
+    API_FREEKASSA,
     BOT_URL,
     GOOGLE_CLIENT_ID,
     JWT_SECRET,
     PAYMENT_MAX_PENDING_PER_USER,
+    SHOP_ID_FREEKASSA,
     SMTP_FROM,
     SMTP_HOST,
     SMTP_PASSWORD,
     SMTP_PORT,
     SMTP_USER,
     TG_TOKEN,
-    WATA_API_CARD_KEY,
-    WATA_API_SBP_KEY,
 )
 from lexicon import dct_desc, dct_price, lexicon
 from logging_config import logger
-from payments.pay_wata import pay_site
+from payments.pay_freekassa import pay_site
 import aiohttp
 
 
@@ -737,10 +737,10 @@ async def payments_create(ctx: JwtCtx, body: CreatePaymentIn):
     if billing_user_id in ADMIN_IDS:
         price = 1
 
-    if body.method == "sbp" and not WATA_API_SBP_KEY:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "WATA SBP is not configured")
-    if body.method == "card" and not WATA_API_CARD_KEY:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "WATA card is not configured")
+    if body.method == "sbp" and (not API_FREEKASSA or SHOP_ID_FREEKASSA is None):
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "FreeKassa is not configured")
+    if body.method == "card" and (not API_FREEKASSA or SHOP_ID_FREEKASSA is None):
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "FreeKassa is not configured")
 
     description = (
         f"Подписка в подарок {dct_desc[desc_key]}" if body.is_gift else dct_desc[desc_key]
