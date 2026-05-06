@@ -906,6 +906,30 @@ class AsyncSQL:
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]
 
+    async def select_user_ids_subscription_end_on_may_2_5_2026(self) -> List[int]:
+        """
+        Обычная подписка: календарный день subscription_end_date (UTC, как в остальных выборках)
+        совпадает с одним из 2026-05-02 … 2026-05-05.
+        """
+        targets = (
+            date(2026, 5, 2),
+            date(2026, 5, 3),
+            date(2026, 5, 4),
+            date(2026, 5, 5),
+        )
+        async with self.session_factory() as session:
+            stmt = (
+                select(Users.user_id)
+                .where(
+                    Users.is_delete == False,
+                    Users.subscription_end_date.isnot(None),
+                    cast(Users.subscription_end_date, Date).in_(targets),
+                )
+                .order_by(Users.user_id)
+            )
+            result = await session.execute(stmt)
+            return [row[0] for row in result.all()]
+
     async def SELECT_USER_IDS_PANEL_EXPIRED_REGULAR_SUBSCRIPTION(self) -> List[int]:
         """
         В панели, не удалены, обычная подписка по календарю UTC истекла или даты нет.

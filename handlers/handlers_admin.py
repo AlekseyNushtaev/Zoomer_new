@@ -18,6 +18,14 @@ from aiogram.filters import Command
 
 from sheduler.check_connect import check_connect
 
+_ADD_7_MAY_GIFT_HTML = (
+    "🎁 <b>Сюрприз от Zoomer VPN</b>\n\n"
+    "Добрый день!\n\n"
+    "Мы дарим вам <b>7 дней бесплатного доступа</b> к VPN — с благодарностью, что вы с нами. "
+    "Пользуйтесь спокойно и безопасно в сети. ✨\n\n"
+    "Ниже — кнопка, чтобы сразу перейти к подключению 👇"
+)
+
 router = Router()
 
 _MSK = timezone(timedelta(hours=3))
@@ -1120,6 +1128,94 @@ async def add_2d_command(message: Message):
         message.from_user.id,
         n_sub,
         n_white,
+    )
+
+
+@router.message(Command(commands=['add_7_to_may']))
+async def add_7_to_may_command(message: Message):
+    """
+    Пользователи с subscription_end_date (календарный день UTC) 2026-05-02 … 2026-05-05:
+    +7 дней обычной подписки в панели, уведомление в ЛС; при ошибке отправки — is_delete=True.
+    """
+    if not message.from_user or message.from_user.id not in ADMIN_IDS:
+        return
+
+    user_ids = await sql.select_user_ids_subscription_end_on_may_2_5_2026()
+    n = len(user_ids)
+    await message.answer(
+        f"📋 В выборке (окончание обычной подписки по UTC: 02–05.05.2026): <b>{n}</b>\n\n"
+        f"⏳ Обрабатываю: панель +7 дн., затем сообщение пользователю…",
+        parse_mode="HTML",
+    )
+
+    panel_ok = 0
+    panel_fail = 0
+    msg_ok = 0
+    msg_fail = 0
+    skipped_no_tg_chat = 0
+    deleted_after_send_fail = 0
+
+    for user_id in user_ids:
+        ok = await x3.updateClient(7, str(user_id), user_id)
+        if not ok:
+            panel_fail += 1
+            logger.warning("add_7_to_may: панель не обновлена user_id=%s", user_id)
+        else:
+            panel_ok += 1
+            if not is_telegram_chat_id(user_id):
+                skipped_no_tg_chat += 1
+            else:
+                try:
+                    await bot.send_message(
+                        user_id,
+                        _ADD_7_MAY_GIFT_HTML,
+                        parse_mode="HTML",
+                        reply_markup=create_kb(
+                            1,
+                            styles={"connect_vpn": STYLE_PRIMARY},
+                            connect_vpn="🔗 Подключить VPN",
+                        ),
+                    )
+                    msg_ok += 1
+                except Exception as e:
+                    msg_fail += 1
+                    logger.warning(
+                        "add_7_to_may: не отправлено user_id=%s: %s",
+                        user_id,
+                        e,
+                    )
+                    try:
+                        await sql.update_delete(user_id, True)
+                        deleted_after_send_fail += 1
+                    except Exception as db_e:
+                        logger.exception(
+                            "add_7_to_may: не удалось выставить is_delete user_id=%s: %s",
+                            user_id,
+                            db_e,
+                        )
+
+        await asyncio.sleep(0.1)
+
+    await message.answer(
+        "✅ <b>Отчёт /add_7_to_may</b>\n"
+        f"• В выборке: {n}\n"
+        f"• Панель + БД: успешно {panel_ok}, ошибок {panel_fail}\n"
+        f"• Сообщения в Telegram: отправлено {msg_ok}, ошибок {msg_fail}\n"
+        f"• После ошибки отправки выставлено <code>is_delete=True</code>: {deleted_after_send_fail}\n"
+        f"• Пропущено (нет личного чата Telegram): {skipped_no_tg_chat}",
+        parse_mode="HTML",
+    )
+    logger.info(
+        "Админ %s: /add_7_to_may total=%s panel_ok=%s panel_fail=%s msg_ok=%s msg_fail=%s "
+        "deleted_after_fail=%s skipped_chat=%s",
+        message.from_user.id,
+        n,
+        panel_ok,
+        panel_fail,
+        msg_ok,
+        msg_fail,
+        deleted_after_send_fail,
+        skipped_no_tg_chat,
     )
 
 
