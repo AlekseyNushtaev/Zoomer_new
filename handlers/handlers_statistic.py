@@ -252,7 +252,7 @@ async def stat_command(message: Message):
     if total is None:
         await message.answer(f"{arg} - нет совпадений")
     else:
-        await message.answer(f"{arg} {total} {with_sub} {with_tarif} {with_tarif_not_blocked} - {total_payments} руб {wata_sbp} {wata_card} {fk_sbp}")
+        await message.answer(f"{arg} {total} {with_sub} {with_tarif} {with_tarif_not_blocked} - {total_payments} руб")
 
 
 @router.message(Command(commands=['anal_export']))
