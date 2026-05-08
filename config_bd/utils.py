@@ -1352,11 +1352,13 @@ class AsyncSQL:
                     PaymentsWataSBP.user_id.in_(chunk),
                     PaymentsWataSBP.status == 'confirmed',
                 )
+                wata_sbp = total_payments
                 total_payments += (await session.execute(stmt_wata_sbp)).scalar() or 0
                 stmt_wata_card = select(func.coalesce(func.sum(PaymentsWataCard.amount), 0)).where(
                     PaymentsWataCard.user_id.in_(chunk),
                     PaymentsWataCard.status == 'confirmed',
                 )
+                wata_card = total_payments - wata_sbp
                 total_payments += (await session.execute(stmt_wata_card)).scalar() or 0
                 stmt_fk_sbp = select(func.coalesce(func.sum(PaymentsFkSBP.amount), 0)).where(
                     PaymentsFkSBP.user_id.in_(chunk),
@@ -1364,9 +1366,9 @@ class AsyncSQL:
                 )
                 total_payments += (await session.execute(stmt_fk_sbp)).scalar() or 0
 
-        total_payments //= 2
+                fk_sbp = total_payments - wata_sbp - wata_card
 
-        return total, with_sub, with_tarif, with_tarif_not_blocked, total_payments, source
+        return total, with_sub, with_tarif, with_tarif_not_blocked, total_payments, source, wata_sbp, wata_card, fk_sbp
 
     def GET_AVAILABLE_PARAMETERS(self) -> List[str]:
         """Возвращает список доступных параметров для фильтрации пользователей."""
