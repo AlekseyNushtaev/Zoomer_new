@@ -448,6 +448,9 @@ async def _bot_deeplink_for_sub_page() -> str:
     except Exception as e:
         logger.warning("sub_page pay: bot.get_me failed: {}", e)
     return "https://t.me/"
+
+
+class RegisterIn(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6, max_length=256)
 
