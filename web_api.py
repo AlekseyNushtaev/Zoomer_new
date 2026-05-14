@@ -110,7 +110,12 @@ def confirm_tg_auth_token(token: str, telegram_user_id: int, first_name: str = "
     return True
 
 
-app = FastAPI(title="Zoomer Web API")
+app = FastAPI(
+    title="Zoomer Web API",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 
 # Разрешены запросы с любого origin (без credentials — иначе браузер не принимает allow_origins="*").
 app.add_middleware(
