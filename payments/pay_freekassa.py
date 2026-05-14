@@ -272,8 +272,9 @@ async def pay_site(
     is_gift: bool,
     kind: UiKind,
     telegram_username: Optional[str] = None,
+    payload_source: str = "site",
 ) -> Dict[str, Any]:
-    """Оплата с сайта (web API): payload с user_id/email, method fk_sbp/fk_card, source:site."""
+    """Оплата с сайта (web API): payload с user_id/email, method fk_sbp/fk_card, source в payload_source."""
     if not await payment_creation_allowed(int(billing_user_id), telegram_username):
         return {"status": "rate_limited", "url": "", "id": ""}
     if not API_FREEKASSA or SHOP_ID_FREEKASSA is None:
@@ -288,7 +289,7 @@ async def pay_site(
     gift_str = "True" if is_gift else "False"
     payload = (
         f"user_id:{payload_user},duration:{duration},white:{white},gift:{gift_str},"
-        f"method:{pm},amount:{int(float(val))},source:site"
+        f"method:{pm},amount:{int(float(val))},source:{payload_source}"
     )
     fk = FreekassaPayment(API_FREEKASSA, SHOP_ID_FREEKASSA)
     nonce = await sql.alloc_fk_api_nonce()

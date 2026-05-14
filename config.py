@@ -40,6 +40,9 @@ JWT_SECRET: Optional[str] = os.environ.get("JWT_SECRET")
 GOOGLE_CLIENT_ID: Optional[str] = os.environ.get("GOOGLE_CLIENT_ID")
 WEB_API_PORT: int = int(os.environ.get("WEB_API_PORT", "8080"))
 
+# Кастомная страница подписки: POST /api/v1/sub_page/pay/* (заголовок X-Sub-Page-Api-Key или Bearer).
+SUB_PAGE_API_KEY: Optional[str] = (os.environ.get("SUB_PAGE_API_KEY") or "").strip() or None
+
 # Антиспам по апдейтам Telegram: не более N событий от одного user_id за window секунд (скользящее окно).
 THROTTLE_MAX_UPDATES: int = int(os.environ.get("THROTTLE_MAX_UPDATES", "25"))
 THROTTLE_WINDOW_SEC: float = float(os.environ.get("THROTTLE_WINDOW_SEC", "8"))

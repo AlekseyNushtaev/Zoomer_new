@@ -94,6 +94,7 @@ async def create_cryptobot_payment(
     white: bool,
     is_gift: bool,
     telegram_username: Optional[str] = None,
+    payload_source: Optional[str] = None,
 ) -> Dict:
     """
     Создание платежа через Cryptobot с суммой в рублях.
@@ -106,6 +107,8 @@ async def create_cryptobot_payment(
 
     payload = (f"user_id:{user_id},duration:{duration},white:{white},"
                f"gift:{is_gift},method:cryptobot,amount:{rub_amount}")
+    if payload_source:
+        payload = f"{payload},source:{payload_source}"
 
     result = await cryptobot.create_invoice(
         fiat_amount=float(rub_amount),

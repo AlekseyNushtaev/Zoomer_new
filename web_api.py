@@ -11,10 +11,11 @@ from typing import Annotated, Any, Literal, Optional
 
 import bcrypt
 import jwt
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from aiogram.types import LabeledPrice
+from fastapi import Depends, FastAPI, HTTPException, Request, Security, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.exc import IntegrityError
 
@@ -26,6 +27,7 @@ from config import (
     ADMIN_IDS,
     API_FREEKASSA,
     BOT_URL,
+    CRYPTOBOT_API_TOKEN,
     GOOGLE_CLIENT_ID,
     JWT_SECRET,
     PAYMENT_MAX_PENDING_PER_USER,
@@ -35,11 +37,15 @@ from config import (
     SMTP_PASSWORD,
     SMTP_PORT,
     SMTP_USER,
+    SUB_PAGE_API_KEY,
     TG_TOKEN,
 )
+from keyboard import keyboard_payment_stars
 from lexicon import dct_desc, dct_price, lexicon
 from logging_config import logger
+from payments.pay_cryptobot import create_cryptobot_payment
 from payments.pay_freekassa import pay_site
+from payments.pay_stars import get_stars_amount
 import aiohttp
 
 
@@ -64,6 +70,16 @@ def _rate_limit_or_raise(request_ip: str, action: str, max_req: int = 5, window:
     key = f"{action}:{request_ip}"
     if not _rate_check(key, max_req, window):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Слишком много попыток. Подождите 5 минут.")
+
+
+def _client_ip_for_rate_limit(request: Request) -> str:
+    x_real = (request.headers.get("x-real-ip") or "").strip()
+    if x_real:
+        return x_real
+    xff = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    if xff:
+        return xff
+    return request.client.host if request.client else ""
 
 
 # ── Telegram deeplink auth tokens (in-memory) ───────────────────────
@@ -96,18 +112,13 @@ def confirm_tg_auth_token(token: str, telegram_user_id: int, first_name: str = "
 
 app = FastAPI(title="Zoomer Web API")
 
+# Разрешены запросы с любого origin (без credentials — иначе браузер не принимает allow_origins="*").
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://zoomersky.online",
-        "https://pussydestroyer.life",
-        "http://187.127.68.142",
-        "https://4zoomer.top",
-        "http://4zoomer.top",
-    ],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
     expose_headers=["X-Auth-Token"],
 )
 
@@ -387,7 +398,56 @@ class CreatePaymentIn(BaseModel):
     is_gift: bool = False
 
 
-class RegisterIn(BaseModel):
+SubPageDuration = Literal["7", "30", "90", "180", "5000", "white_30"]
+SUB_PAGE_PAYLOAD_SOURCE = "subpage"
+
+sub_page_api_key_header = APIKeyHeader(
+    name="X-Sub-Page-Api-Key",
+    scheme_name="SubPageApiKey",
+    auto_error=False,
+    description="Значение из .env: SUB_PAGE_API_KEY",
+)
+
+
+async def require_sub_page_auth(
+    request: Request,
+    x_sub_page_key: Optional[str] = Security(sub_page_api_key_header),
+) -> None:
+    if not SUB_PAGE_API_KEY:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Не задан SUB_PAGE_API_KEY — эндпоинты страницы подписки отключены.",
+        )
+    if x_sub_page_key == SUB_PAGE_API_KEY:
+        return
+    bearer = (request.headers.get("Authorization") or "").strip()
+    if bearer.lower().startswith("bearer "):
+        if bearer[7:].strip() == SUB_PAGE_API_KEY:
+            return
+    raise HTTPException(
+        status.HTTP_401_UNAUTHORIZED,
+        "Неверный или отсутствующий ключ страницы подписки.",
+    )
+
+
+SubPageAuth = Annotated[None, Depends(require_sub_page_auth)]
+
+
+class SubPagePayIn(BaseModel):
+    user_id: int = Field(..., description="Telegram user id")
+    duration: SubPageDuration
+
+
+async def _bot_deeplink_for_sub_page() -> str:
+    if BOT_URL and str(BOT_URL).strip():
+        return str(BOT_URL).rstrip("/")
+    try:
+        me = await bot.get_me()
+        if me.username:
+            return f"https://t.me/{me.username}"
+    except Exception as e:
+        logger.warning("sub_page pay: bot.get_me failed: {}", e)
+    return "https://t.me/"
     email: EmailStr
     password: str = Field(min_length=6, max_length=256)
 
@@ -773,6 +833,156 @@ async def payments_create(ctx: JwtCtx, body: CreatePaymentIn):
     return {
         "payment_url": result.get("url") or "",
         "payment_id": result.get("id") or "",
+    }
+
+
+@app.post("/api/v1/sub_page/pay/fk_sbp")
+async def sub_page_pay_fk_sbp(body: SubPagePayIn, request: Request, _: SubPageAuth):
+    _rate_limit_or_raise(_client_ip_for_rate_limit(request), "sub_page_fk_sbp", max_req=20, window=300)
+    if not API_FREEKASSA or SHOP_ID_FREEKASSA is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "FreeKassa не настроена")
+
+    desc_key, duration_str, white = _tariff_parts(body.duration)
+    price = dct_price[body.duration]
+    if body.user_id in ADMIN_IDS:
+        price = 1
+
+    result = await pay_site(
+        val=str(price),
+        des=dct_desc[desc_key],
+        payload_user=str(body.user_id),
+        billing_user_id=body.user_id,
+        duration=duration_str,
+        white=white,
+        is_gift=False,
+        kind="sbp",
+        telegram_username=None,
+        payload_source=SUB_PAGE_PAYLOAD_SOURCE,
+    )
+    if result["status"] == "rate_limited":
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            lexicon["payment_too_many_pending"].format(PAYMENT_MAX_PENDING_PER_USER),
+        )
+    if result["status"] != "pending":
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Не удалось создать платёж FreeKassa (СБП)")
+
+    return {
+        "payment_url": result.get("url") or "",
+        "payment_id": result.get("id") or "",
+    }
+
+
+@app.post("/api/v1/sub_page/pay/fk_card")
+async def sub_page_pay_fk_card(body: SubPagePayIn, request: Request, _: SubPageAuth):
+    _rate_limit_or_raise(_client_ip_for_rate_limit(request), "sub_page_fk_card", max_req=20, window=300)
+    if not API_FREEKASSA or SHOP_ID_FREEKASSA is None:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "FreeKassa не настроена")
+
+    desc_key, duration_str, white = _tariff_parts(body.duration)
+    price = dct_price[body.duration]
+    if body.user_id in ADMIN_IDS:
+        price = 1
+
+    result = await pay_site(
+        val=str(price),
+        des=dct_desc[desc_key],
+        payload_user=str(body.user_id),
+        billing_user_id=body.user_id,
+        duration=duration_str,
+        white=white,
+        is_gift=False,
+        kind="card",
+        telegram_username=None,
+        payload_source=SUB_PAGE_PAYLOAD_SOURCE,
+    )
+    if result["status"] == "rate_limited":
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            lexicon["payment_too_many_pending"].format(PAYMENT_MAX_PENDING_PER_USER),
+        )
+    if result["status"] != "pending":
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Не удалось создать платёж FreeKassa (карта)")
+
+    return {
+        "payment_url": result.get("url") or "",
+        "payment_id": result.get("id") or "",
+    }
+
+
+@app.post("/api/v1/sub_page/pay/stars")
+async def sub_page_pay_stars(body: SubPagePayIn, request: Request, _: SubPageAuth):
+    _rate_limit_or_raise(_client_ip_for_rate_limit(request), "sub_page_stars", max_req=20, window=300)
+
+    desc_key, duration_str, white = _tariff_parts(body.duration)
+    stars_amount = int(get_stars_amount("Stars", body.duration))
+    if body.user_id in ADMIN_IDS:
+        stars_amount = 1
+
+    gift_flag = False
+    payload = (
+        f"user_id:{body.user_id},duration:{duration_str},white:{white},gift:{gift_flag},"
+        f"method:stars,amount:{stars_amount},source:{SUB_PAGE_PAYLOAD_SOURCE}"
+    )
+    prices = [LabeledPrice(label="XTR", amount=stars_amount)]
+    dur_label = "30" if duration_str == "30secret" else duration_str
+    title = f"Оплата подписки на {dur_label} дней."
+    description = lexicon["payment_link_white"] if white else lexicon["payment_link"]
+
+    try:
+        await bot.send_invoice(
+            body.user_id,
+            title=title,
+            description=description,
+            prices=prices,
+            provider_token="",
+            payload=payload,
+            currency="XTR",
+            reply_markup=keyboard_payment_stars(stars_amount),
+        )
+    except Exception as e:
+        logger.error("sub_page stars send_invoice user_id={}: {}", body.user_id, e)
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "Не удалось отправить счёт в Telegram (возможно, бот заблокирован или нет диалога).",
+        )
+
+    bot_url = await _bot_deeplink_for_sub_page()
+    return {"bot_url": bot_url, "stars_amount": stars_amount}
+
+
+@app.post("/api/v1/sub_page/pay/cryptobot")
+async def sub_page_pay_cryptobot(body: SubPagePayIn, request: Request, _: SubPageAuth):
+    _rate_limit_or_raise(_client_ip_for_rate_limit(request), "sub_page_cryptobot", max_req=20, window=300)
+    if not CRYPTOBOT_API_TOKEN:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "CryptoBot не настроен")
+
+    desc_key, duration_str, white = _tariff_parts(body.duration)
+    price = dct_price[body.duration]
+    if body.user_id in ADMIN_IDS:
+        price = 1
+
+    result = await create_cryptobot_payment(
+        rub_amount=price,
+        description=dct_desc[desc_key],
+        user_id=body.user_id,
+        duration=duration_str,
+        white=white,
+        is_gift=False,
+        telegram_username=None,
+        payload_source=SUB_PAGE_PAYLOAD_SOURCE,
+    )
+    if result.get("status") == "rate_limited":
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            lexicon["payment_too_many_pending"].format(PAYMENT_MAX_PENDING_PER_USER),
+        )
+    if result.get("status") != "pending":
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Не удалось создать счёт CryptoBot")
+
+    return {
+        "payment_url": result.get("url") or "",
+        "invoice_id": result.get("invoice_id"),
     }
 
 
