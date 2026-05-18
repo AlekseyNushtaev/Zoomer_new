@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import hmac
+import os
 import secrets
 import smtplib
 import string
@@ -117,11 +118,18 @@ app = FastAPI(
     openapi_url=None,
 )
 
-# Разрешены запросы с любого origin (без credentials — иначе браузер не принимает allow_origins="*").
+# Фронт (axios withCredentials) требует конкретный Access-Control-Allow-Origin + Allow-Credentials.
+# С allow_origins=["*"] и cookies браузер скрывает ответ → в логах только OPTIONS 200, POST «Network Error».
+_CORS_ORIGIN_REGEX = os.environ.get(
+    "CORS_ORIGIN_REGEX",
+    r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+    r"|^https://[a-z0-9-]+\.(ngrok-free\.dev|ngrok-free\.app|ngrok\.io|trycloudflare\.com|loca\.lt)$",
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origin_regex=_CORS_ORIGIN_REGEX,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-Auth-Token"],
