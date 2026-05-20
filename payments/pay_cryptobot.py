@@ -9,6 +9,7 @@ from keyboard import create_kb, STYLE_SUCCESS
 from lexicon import lexicon, dct_price, dct_desc
 from logging_config import logger
 from payments.payment_limits import payment_creation_allowed
+from payments.payload_source import BOT
 
 router: Router = Router()
 
@@ -177,6 +178,7 @@ async def process_payment_crypto(callback: CallbackQuery):
         white=white_flag,
         is_gift=gift_flag,
         telegram_username=callback.from_user.username,
+        payload_source=BOT,
     )
 
     if result['status'] == 'pending':

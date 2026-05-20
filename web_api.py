@@ -44,6 +44,7 @@ from config import (
 from keyboard import keyboard_payment_stars
 from lexicon import dct_desc, dct_price, lexicon
 from logging_config import logger
+from payments.payload_source import SITE, SUBPAGE
 from payments.pay_cryptobot import create_cryptobot_payment
 from payments.pay_freekassa import pay_site
 from payments.pay_stars import get_stars_amount
@@ -454,7 +455,7 @@ class CreatePaymentIn(BaseModel):
 
 
 SubPageDuration = Literal["7", "30", "90", "180", "5000", "white_30"]
-SUB_PAGE_PAYLOAD_SOURCE = "subpage"
+SUB_PAGE_PAYLOAD_SOURCE = SUBPAGE
 
 sub_page_api_key_header = APIKeyHeader(
     name="X-Sub-Page-Api-Key",
@@ -917,6 +918,7 @@ async def payments_create(ctx: JwtCtx, body: CreatePaymentIn):
         is_gift=body.is_gift,
         kind=body.method,
         telegram_username=site_uname,
+        payload_source=SITE,
     )
 
     if result["status"] == "rate_limited":

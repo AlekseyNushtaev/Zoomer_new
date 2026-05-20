@@ -10,6 +10,7 @@ from keyboard import keyboard_payment_sbp, create_kb
 from lexicon import dct_price, dct_desc, lexicon
 from logging_config import logger
 from payments.payment_limits import payment_creation_allowed
+from payments.payload_source import BOT
 
 router = Router()
 
@@ -111,7 +112,10 @@ async def pay(
         method = 'card'
     else:
         method = 'crypto'
-    payload = f"user_id:{user_id},duration:{duration},white:{white},gift:False,method:{method},amount:{int(val)}"
+    payload = (
+        f"user_id:{user_id},duration:{duration},white:{white},gift:False,"
+        f"method:{method},amount:{int(val)},source:{BOT}"
+    )
 
     try:
         result = await platega.create_payment(
@@ -165,7 +169,10 @@ async def pay_for_gift(
         method = 'card'
     else:
         method = 'crypto'
-    payload = f"user_id:{user_id},duration:{duration},white:{white},gift:True,method:{method},amount:{int(val)}"
+    payload = (
+        f"user_id:{user_id},duration:{duration},white:{white},gift:True,"
+        f"method:{method},amount:{int(val)},source:{BOT}"
+    )
 
     try:
         result = await platega.create_payment(

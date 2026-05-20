@@ -6,6 +6,7 @@ from logging_config import logger
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, LabeledPrice, PreCheckoutQuery, Message
 from lexicon import lexicon
+from payments.payload_source import BOT
 from payments.process_payload import process_confirmed_payment
 
 
@@ -49,7 +50,10 @@ async def process_payment_stars(callback: CallbackQuery):
     if 'old' in duration:
         duration = duration.replace('old', '')
 
-    payload = f"user_id:{user_id},duration:{duration},white:{white_flag},gift:{gift_flag},method:stars,amount:{stars_amount}"
+    payload = (
+        f"user_id:{user_id},duration:{duration},white:{white_flag},gift:{gift_flag},"
+        f"method:stars,amount:{stars_amount},source:{BOT}"
+    )
 
     prices = [LabeledPrice(label="XTR", amount=stars_amount)]
     dur_label = "30" if duration == "30secret" else duration

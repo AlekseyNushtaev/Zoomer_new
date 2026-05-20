@@ -19,6 +19,7 @@ from keyboard import keyboard_payment_sbp, create_kb
 from lexicon import dct_price, dct_desc, lexicon
 from logging_config import logger
 from payments.payment_limits import payment_creation_allowed
+from payments.payload_source import BOT, SITE
 
 router = Router()
 
@@ -169,7 +170,7 @@ async def pay(
     pm = _payload_method(ui_kind)
     amount_rub = _fk_amount_rub(val, ui_kind)
     payload = (
-        f"user_id:{user_id},duration:{duration},white:{white},gift:False,method:{pm},amount:{amount_rub}"
+        f"user_id:{user_id},duration:{duration},white:{white},gift:False,method:{pm},amount:{amount_rub},source:{BOT}"
     )
     fk = FreekassaPayment(API_FREEKASSA, SHOP_ID_FREEKASSA)
     nonce = await sql.alloc_fk_api_nonce()
@@ -224,7 +225,7 @@ async def pay_for_gift(
     pm = _payload_method(ui_kind)
     amount_rub = _fk_amount_rub(val, ui_kind)
     payload = (
-        f"user_id:{user_id},duration:{duration},white:{white},gift:True,method:{pm},amount:{amount_rub}"
+        f"user_id:{user_id},duration:{duration},white:{white},gift:True,method:{pm},amount:{amount_rub},source:{BOT}"
     )
     fk = FreekassaPayment(API_FREEKASSA, SHOP_ID_FREEKASSA)
     nonce = await sql.alloc_fk_api_nonce()
@@ -272,7 +273,7 @@ async def pay_site(
     is_gift: bool,
     kind: UiKind,
     telegram_username: Optional[str] = None,
-    payload_source: str = "site",
+    payload_source: str = SITE,
 ) -> Dict[str, Any]:
     """Оплата с сайта (web API): payload с user_id/email, method fk_sbp/fk_card, source в payload_source."""
     if not await payment_creation_allowed(int(billing_user_id), telegram_username):

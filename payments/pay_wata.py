@@ -10,6 +10,7 @@ from aiogram.types import CallbackQuery
 from bot import sql
 from config import ADMIN_IDS, BOT_URL, PAYMENT_MAX_PENDING_PER_USER, WATA_API_BASE, WATA_API_CARD_KEY, WATA_API_SBP_KEY
 from payments.payment_limits import payment_creation_allowed
+from payments.payload_source import BOT, SITE
 from keyboard import keyboard_payment_sbp, create_kb
 from lexicon import dct_price, dct_desc, lexicon
 from logging_config import logger
@@ -220,7 +221,7 @@ async def pay(
         return {"status": "error", "url": "", "id": ""}
 
     method = "wata_sbp" if kind == "sbp" else "wata_card"
-    payload = f"user_id:{user_id},duration:{duration},white:{white},gift:False,method:{method},amount:{int(val)}"
+    payload = f"user_id:{user_id},duration:{duration},white:{white},gift:False,method:{method},amount:{int(val)},source:{BOT}"
     order_id = f"{method}-{uuid.uuid4().hex}"
     amount_api = _wata_amount_rub(val)
 
@@ -272,7 +273,7 @@ async def pay_for_gift(
         return {"status": "error", "url": "", "id": ""}
 
     method = "wata_sbp" if kind == "sbp" else "wata_card"
-    payload = f"user_id:{user_id},duration:{duration},white:{white},gift:True,method:{method},amount:{int(val)}"
+    payload = f"user_id:{user_id},duration:{duration},white:{white},gift:True,method:{method},amount:{int(val)},source:{BOT}"
     order_id = f"{method}-gift-{uuid.uuid4().hex}"
     amount_api = _wata_amount_rub(val)
 
@@ -319,8 +320,9 @@ async def pay_site(
     is_gift: bool,
     kind: WataKind,
     telegram_username: Optional[str] = None,
+    payload_source: str = SITE,
 ) -> Dict[str, Any]:
-    """Оплата с сайта (web API): payload с user_id/email, method wata_sbp/wata_card, source:site."""
+    """Оплата с сайта (web API): payload с user_id/email, method wata_sbp/wata_card, source в payload_source."""
     if not await payment_creation_allowed(int(billing_user_id), telegram_username):
         return {"status": "rate_limited", "url": "", "id": ""}
     token = WATA_API_SBP_KEY if kind == "sbp" else WATA_API_CARD_KEY
@@ -332,7 +334,7 @@ async def pay_site(
     gift_str = "True" if is_gift else "False"
     payload = (
         f"user_id:{payload_user},duration:{duration},white:{white},gift:{gift_str},"
-        f"method:{method},amount:{int(val)},source:site"
+        f"method:{method},amount:{int(val)},source:{payload_source}"
     )
     order_id = f"{method}-site-{uuid.uuid4().hex}"
     amount_api = _wata_amount_rub(val)
