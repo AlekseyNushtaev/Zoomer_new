@@ -1,16 +1,27 @@
+import urllib.parse
+
 from bot import sql, x3, bot
 from config import CHANEL_ID, PUBLIC_SITE_URL
 from lead_tracker import post_user_registered, post_user_trial, tracker_source_from_ref_and_stamp
 from keyboard import (keyboard_start, keyboard_start_bonus, keyboard_tariff_bonus, keyboard_tariff,
                       keyboard_subscription, keyboard_sub_after_free, ref_keyboard, keyboard_gift_tariff,
                       keyboard_payment_method, keyboard_payment_method_stock, chanel_keyboard, create_kb,
-                      keyboard_inline_ref, STYLE_PRIMARY)
+                      keyboard_inline_ref, STYLE_PRIMARY, OPEN_SITE_CB, SITE_URL)
+from web_api import create_bot_site_login_token
 from logging_config import logger
 import asyncio
 import re
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, ChatMemberUpdated, InlineQueryResultArticle, InputTextMessageContent, \
-    InlineQuery
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    ChatMemberUpdated,
+    InlineQueryResultArticle,
+    InputTextMessageContent,
+    InlineQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+)
 from aiogram.filters import BaseFilter, ChatMemberUpdatedFilter, KICKED, MEMBER, Command
 from lexicon import lexicon
 
@@ -155,6 +166,54 @@ async def process_start_command(message: Message, command: Command):
         await message.answer(text=lexicon['start'],
                              reply_markup=keyboard_start(),
                              disable_web_page_preview=True)
+
+
+def _site_base_url() -> str:
+    return (PUBLIC_SITE_URL or SITE_URL).rstrip("/")
+
+
+def _site_login_url(telegram_user_id: int, first_name: str, username: str | None) -> str:
+    token = create_bot_site_login_token(
+        telegram_user_id=telegram_user_id,
+        first_name=first_name,
+        username=username,
+    )
+    return f"{_site_base_url()}/auth/bot?token={urllib.parse.quote(token, safe='')}"
+
+
+@router.callback_query(F.data == OPEN_SITE_CB)
+async def open_site_callback(callback: CallbackQuery):
+    """Ссылка на сайт с одноразовым токеном для авто-входа."""
+    await callback.answer()
+    u = callback.from_user
+    login_url = _site_login_url(
+        u.id,
+        u.first_name or "",
+        u.username,
+    )
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🌐 Открыть сайт",
+                    url=login_url,
+                    style=STYLE_PRIMARY,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔙 Назад",
+                    callback_data="back_to_main",
+                )
+            ],
+        ]
+    )
+    await callback.message.answer(
+        "🌐 Нажмите кнопку ниже — откроется сайт, вход выполнится автоматически.\n"
+        "Ссылка действует 10 минут и только один раз.",
+        reply_markup=kb,
+        disable_web_page_preview=True,
+    )
 
 
 @router.callback_query(F.data == 'buy_vpn')

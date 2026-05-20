@@ -111,6 +111,43 @@ def confirm_tg_auth_token(token: str, telegram_user_id: int, first_name: str = "
     return True
 
 
+# ── Bot → site one-time login (кнопка «Наш сайт») ───────────────────
+_bot_site_login_tokens: dict[str, dict[str, Any]] = {}
+BOT_SITE_LOGIN_TOKEN_TTL = 600  # 10 minutes
+
+
+def _cleanup_expired_bot_site_tokens() -> None:
+    now = time.time()
+    expired = [
+        k
+        for k, v in _bot_site_login_tokens.items()
+        if now - v["created"] > BOT_SITE_LOGIN_TOKEN_TTL
+    ]
+    for k in expired:
+        del _bot_site_login_tokens[k]
+
+
+def create_bot_site_login_token(
+    *,
+    telegram_user_id: int,
+    first_name: str = "",
+    username: Optional[str] = None,
+) -> str:
+    """Одноразовый токен для входа на сайт по ссылке из бота."""
+    _cleanup_expired_bot_site_tokens()
+    token = secrets.token_urlsafe(32)
+    _bot_site_login_tokens[token] = {
+        "status": "pending",
+        "created": time.time(),
+        "telegram_user": {
+            "id": telegram_user_id,
+            "first_name": first_name,
+            "username": username,
+        },
+    }
+    return token
+
+
 app = FastAPI(
     title="Zoomer Web API",
     docs_url=None,
@@ -406,6 +443,10 @@ class TelegramAuthIn(BaseModel):
     photo_url: Optional[str] = None
 
 
+class BotLoginIn(BaseModel):
+    token: str
+
+
 class CreatePaymentIn(BaseModel):
     tariff_id: str
     method: Literal["sbp", "card"]
@@ -586,6 +627,45 @@ async def auth_check_status(token: str, request: Request):
             "username": tg_user.get("username"),
         },
         status="authenticated",
+    )
+
+
+@app.post("/api/auth/bot-login")
+async def auth_bot_login(body: BotLoginIn, request: Request):
+    """Обмен одноразового токена из бота на JWT (страница /auth/bot)."""
+    client_ip = request.headers.get("x-real-ip", request.client.host)
+    _rate_limit_or_raise(client_ip, "bot_login", max_req=30, window=300)
+    _cleanup_expired_bot_site_tokens()
+
+    raw = (body.token or "").strip()
+    if not raw:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Missing token")
+
+    entry = _bot_site_login_tokens.get(raw)
+    if entry is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired login link")
+    if time.time() - entry["created"] > BOT_SITE_LOGIN_TOKEN_TTL:
+        del _bot_site_login_tokens[raw]
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired login link")
+    if entry["status"] != "pending":
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired login link")
+
+    tg_user = entry["telegram_user"]
+    uid = int(tg_user["id"])
+    user_row = await sql.get_user(uid)
+    if user_row is None:
+        await sql.add_user(uid, False, False)
+
+    del _bot_site_login_tokens[raw]
+    jwt_token = _issue_jwt(user_id=uid, auth="telegram", username=tg_user.get("username"))
+    return _auth_response(
+        request,
+        jwt_token,
+        {
+            "id": uid,
+            "first_name": tg_user.get("first_name", ""),
+            "username": tg_user.get("username"),
+        },
     )
 
 

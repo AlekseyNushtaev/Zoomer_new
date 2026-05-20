@@ -11,6 +11,7 @@ STYLE_SUCCESS = "success"
 STYLE_DANGER = "danger"
 
 SITE_URL = "https://4zoomer.top/"
+OPEN_SITE_CB = "open_site"
 
 
 def create_kb(
@@ -90,7 +91,7 @@ def keyboard_start():
         [
             InlineKeyboardButton(
                 text="🌐 Наш сайт",
-                url=SITE_URL,
+                callback_data=OPEN_SITE_CB,
                 style=STYLE_PRIMARY,
             )
         ]
@@ -222,7 +223,7 @@ def keyboard_subscription(sub_url, sub_url_white):
         [
             InlineKeyboardButton(
                 text="🌐 Войти через сайт",
-                url=SITE_URL,
+                callback_data=OPEN_SITE_CB,
                 style=STYLE_PRIMARY,
             )
         ]
@@ -252,7 +253,7 @@ def keyboard_sub_after_buy(sub_url):
         [
             InlineKeyboardButton(
                 text="🌐 Войти через сайт",
-                url=SITE_URL,
+                callback_data=OPEN_SITE_CB,
                 style=STYLE_PRIMARY,
             )
         ],
@@ -287,7 +288,7 @@ def keyboard_sub_after_free(sub_url):
         [
             InlineKeyboardButton(
                 text="🌐 Войти через сайт",
-                url=SITE_URL,
+                callback_data=OPEN_SITE_CB,
                 style=STYLE_PRIMARY,
             )
         ],
