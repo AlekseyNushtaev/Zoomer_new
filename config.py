@@ -33,6 +33,9 @@ PANEL_URL: Optional[str] = os.environ.get("PANEL_URL")
 PANEL_API_TOKEN: Optional[str] = os.environ.get("PANEL_API_TOKEN")
 SHORT_UUID_SECRET: Optional[str] = os.environ.get("SHORT_UUID_SECRET")
 BOT_URL: str = os.environ.get("BOT_URL") or "https://t.me/zoomerskyvpn_bot"
+PARTNER_PROCENT: int = int(os.environ.get("PARTNER_PROCENT", "20"))
+PARTNER_MIN: int = int(os.environ.get("PARTNER_MIN", "500"))
+PARTNER_SUPPORT_URL: str = os.environ.get("PARTNER_SUPPORT_URL") or "https://t.me/suppzoomvpn"
 # Публичный URL веб-сайта (ЛК), без завершающего слэша — кнопка после входа через Telegram и т.п.
 PUBLIC_SITE_URL: str = (os.environ.get("PUBLIC_SITE_URL") or "").strip().rstrip("/")
 

@@ -116,6 +116,7 @@ async def _post_json(path: str, body: dict[str, Any], *, kind: str = "") -> bool
 
 
 TRACKER_SOURCE_REFERRAL = "referral"
+TRACKER_SOURCE_PARTNER = "partner"
 
 
 def _normalize_source_token(val: Any) -> Optional[str]:
@@ -127,7 +128,14 @@ def _normalize_source_token(val: Any) -> Optional[str]:
     return s or None
 
 
-def tracker_source_from_ref_and_stamp(ref: Any, stamp: Any) -> Optional[str]:
+def tracker_source_from_ref_and_stamp(
+    ref: Any,
+    stamp: Any,
+    partner: Any = None,
+) -> Optional[str]:
+    partner_n = _normalize_source_token(partner)
+    if partner_n:
+        return TRACKER_SOURCE_PARTNER
     ref_n = _normalize_source_token(ref)
     if ref_n:
         return TRACKER_SOURCE_REFERRAL
@@ -137,7 +145,8 @@ def tracker_source_from_ref_and_stamp(ref: Any, stamp: Any) -> Optional[str]:
 def _source_from_row(row: tuple) -> Optional[str]:
     ref = row[2] if len(row) > 2 else None
     stamp = row[14] if len(row) > 14 else None
-    return tracker_source_from_ref_and_stamp(ref, stamp)
+    partner = row[29] if len(row) > 29 else None
+    return tracker_source_from_ref_and_stamp(ref, stamp, partner)
 
 
 async def sync_user_from_db(telegram_user_id: int) -> bool:

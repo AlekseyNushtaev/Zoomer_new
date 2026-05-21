@@ -46,7 +46,7 @@ import { useSubscription } from '@entities/subscription-info-store'
 import { LanguagePicker } from '@shared/ui/language-picker/language-picker.shared'
 import { Page, RemnawaveLogo } from '@shared/ui'
 
-const DEFAULT_SUB_PAGE_PAY_API_BASE = 'http://bot.zoomersky.online'
+const DEFAULT_SUB_PAGE_PAY_API_BASE = 'https://bot.zoomersky.online'
 
 function subPagePayFromBuild(): { apiBase: string; apiKey: string } {
     const rawBase = String(import.meta.env.VITE_SUB_PAGE_PAY_API_BASE ?? '').trim()

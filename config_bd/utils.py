@@ -156,6 +156,10 @@ def _user_tuple(user: Users) -> Tuple:
         user.field_bool_3,
         user.password_hash,
         user.linked_telegram_id,
+        user.partner,
+        user.partner_balance,
+        user.partner_pay,
+        user.partner_flag,
     )
 
 
@@ -601,6 +605,7 @@ class AsyncSQL:
         is_delete: bool = False,
         in_chanel: bool = False,
         stamp: str = '',
+        partner: str = '',
     ) -> bool:
         """True, если строка вставлена; False при конфликте user_id (гонки /start)."""
         async with self.session_factory() as session:
@@ -608,7 +613,8 @@ class AsyncSQL:
                 pg_insert(Users)
                 .values(
                     user_id=user_id,
-                    ref=ref,
+                    ref=ref or None,
+                    partner=partner or None,
                     is_delete=is_delete,
                     in_panel=in_panel,
                     is_connect=is_connect,
@@ -749,6 +755,72 @@ class AsyncSQL:
             stmt = select(func.count(Users.user_id)).where(Users.ref == str(user_id))
             result = await session.execute(stmt)
             return result.scalar() or 0
+
+    async def select_partner_count(self, partner_id: int) -> int:
+        async with self.session_factory() as session:
+            stmt = select(func.count(Users.user_id)).where(Users.partner == str(partner_id))
+            result = await session.execute(stmt)
+            return result.scalar() or 0
+
+    async def select_partner_referrals_payments_sum(self, partner_id: int) -> int:
+        async with self.session_factory() as session:
+            stmt = select(Users.user_id).where(Users.partner == str(partner_id))
+            result = await session.execute(stmt)
+            user_ids = [row[0] for row in result.all()]
+            if not user_ids:
+                return 0
+
+            total = 0
+            for i in range(0, len(user_ids), _STAT_IN_CHUNK):
+                chunk = user_ids[i : i + _STAT_IN_CHUNK]
+                for model in _MERGE_PAYMENT_MODELS:
+                    stmt_sum = select(func.coalesce(func.sum(model.amount), 0)).where(
+                        model.user_id.in_(chunk),
+                        model.status.in_(_BILLING_OK_STATUSES),
+                    )
+                    val = (await session.execute(stmt_sum)).scalar() or 0
+                    total += int(val)
+            return total
+
+    async def update_partner_flag(self, user_id: int, flag: bool = True) -> None:
+        async with self.session_factory() as session:
+            stmt = update(Users).where(Users.user_id == user_id).values(partner_flag=flag)
+            await session.execute(stmt)
+            await session.commit()
+
+    async def add_partner_balance(self, partner_user_id: int, amount: int) -> bool:
+        if amount <= 0:
+            return False
+        async with self.session_factory() as session:
+            stmt = (
+                update(Users)
+                .where(Users.user_id == partner_user_id)
+                .values(partner_balance=func.coalesce(Users.partner_balance, 0) + amount)
+            )
+            result = await session.execute(stmt)
+            await session.commit()
+            return (result.rowcount or 0) > 0
+
+    async def partner_record_payout(self, partner_user_id: int, amount: int) -> Tuple[bool, str]:
+        """
+        Списание с partner_balance и зачисление в partner_pay (вывод средств).
+        Возвращает (успех, сообщение об ошибке).
+        """
+        if amount <= 0:
+            return False, "Сумма должна быть больше 0"
+        async with self.session_factory() as session:
+            stmt = select(Users).where(Users.user_id == partner_user_id)
+            result = await session.execute(stmt)
+            user = result.scalar_one_or_none()
+            if user is None:
+                return False, "Пользователь не найден"
+            balance = user.partner_balance or 0
+            if balance < amount:
+                return False, f"Недостаточно на балансе: {balance} ₽, запрошено {amount} ₽"
+            user.partner_balance = balance - amount
+            user.partner_pay = (user.partner_pay or 0) + amount
+            await session.commit()
+            return True, ""
 
     async def update_subscription_end_date(self, user_id: int, end_date: datetime):
         async with self.session_factory() as session:

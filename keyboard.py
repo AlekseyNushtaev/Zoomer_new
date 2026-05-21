@@ -83,7 +83,7 @@ def keyboard_start():
         },
         buy_vpn='💰 Купить подписку',
         connect_vpn='🔗 Подключить VPN',
-        ref='👫 Рефералка',
+        ref='🎁 Бесплатный VPN за приглашения',
         buy_gift='🎁 Подарить подписку',
     )
     rows = list(markup.inline_keyboard)
@@ -93,6 +93,15 @@ def keyboard_start():
                 text="🌐 Наш сайт",
                 callback_data=OPEN_SITE_CB,
                 style=STYLE_PRIMARY,
+            )
+        ]
+    )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="💸 Зарабатывай с нами",
+                callback_data="partner_earn",
+                style=STYLE_SUCCESS,
             )
         ]
     )
@@ -547,4 +556,47 @@ def keyboard_inline_ref(user_id):
                 style=STYLE_PRIMARY,
             )
         ]
+    ])
+
+
+def keyboard_partner_intro():
+    return create_kb(
+        1,
+        styles={
+            "partner_create_link": STYLE_SUCCESS,
+            "back_to_main": STYLE_PRIMARY,
+        },
+        partner_create_link='🔗 Создать партнёрскую ссылку',
+        back_to_main='🔙 Назад',
+    )
+
+
+def keyboard_partner_dashboard():
+    return create_kb(
+        1,
+        styles={
+            "partner_withdraw": STYLE_SUCCESS,
+            "back_to_main": STYLE_PRIMARY,
+        },
+        partner_withdraw='💰 Создать заявку на вывод',
+        back_to_main='🔙 Назад',
+    )
+
+
+def keyboard_partner_withdraw(support_url: str):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="💬 Вывести деньги",
+                url=support_url,
+                style=STYLE_SUCCESS,
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="🔙 Назад",
+                callback_data="partner_earn",
+                style=STYLE_PRIMARY,
+            )
+        ],
     ])

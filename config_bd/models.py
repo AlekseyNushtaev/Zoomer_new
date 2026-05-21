@@ -56,6 +56,10 @@ class Users(Base):
     field_bool_1 = Column(Boolean, default=False)
     field_bool_2 = Column(Boolean, default=False)
     field_bool_3 = Column(Boolean, default=False)
+    partner = Column(String(100), nullable=True)
+    partner_balance = Column(Integer, default=0)
+    partner_pay = Column(Integer, default=0)
+    partner_flag = Column(Boolean, default=False)
 
 
 class Gifts(Base):

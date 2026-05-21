@@ -1,14 +1,67 @@
 from datetime import datetime
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, Tuple
 
 from bot import x3, sql, bot
 
+from config import PARTNER_PROCENT, LEAD_TRACKER_STAR_RUB_PER_STAR
 from config_bd.utils import _norm_email, _payload_duration_to_panel_days
 from lead_tracker import post_payment_success
 from X3 import panel_username_for_site_user
 from keyboard import create_kb, keyboard_sub_after_buy
 from lexicon import lexicon
 from logging_config import logger
+
+
+def _payment_rub_for_partner(method: str, amount: int | float) -> int:
+    """Сумма оплаты в рублях для расчёта партнёрского вознаграждения."""
+    if method == "stars":
+        stars = Decimal(str(amount))
+        rate = Decimal(str(LEAD_TRACKER_STAR_RUB_PER_STAR))
+        rub = (stars * rate).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        return int(rub)
+    return int(Decimal(str(amount)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+async def _credit_partner_commission(payer_uid: int, method: str, amount: int | float) -> None:
+    """Начисляет PARTNER_PROCENT% партнёру, если плательщик пришёл по partner-ссылке."""
+    try:
+        user_row = await sql.get_user(payer_uid)
+        if not user_row or len(user_row) <= 29:
+            return
+        partner_str = user_row[29]
+        if not partner_str:
+            return
+        partner_id = int(partner_str)
+        if partner_id <= 0 or partner_id == payer_uid:
+            return
+
+        rub = _payment_rub_for_partner(method, amount)
+        commission = rub * PARTNER_PROCENT // 100
+        if commission <= 0:
+            return
+
+        credited = await sql.add_partner_balance(partner_id, commission)
+        if not credited:
+            logger.warning("Партнёр {} не найден, начисление {} ₽ пропущено", partner_id, commission)
+            return
+
+        try:
+            await bot.send_message(
+                chat_id=partner_id,
+                text=lexicon["partner_success"].format(commission),
+                reply_markup=create_kb(1, back_to_main="🔙 Назад"),
+            )
+            logger.info(
+                "✅ Партнёру {} начислено {} ₽ за оплату пользователя {}",
+                partner_id,
+                commission,
+                payer_uid,
+            )
+        except Exception as e:
+            logger.error("❌ Ошибка уведомления партнёра {}: {}", partner_id, e)
+    except (ValueError, TypeError) as e:
+        logger.error("❌ Ошибка начисления партнёрского вознаграждения: {}", e)
 
 
 async def _resolve_buyer_for_payment(
@@ -161,6 +214,8 @@ async def process_confirmed_payment(payload):
             if pay_tracker_uid is not None:
                 await post_payment_success(pay_tracker_uid, method, amount)
 
+            await _credit_partner_commission(giver_billing_id, method, amount)
+
             marker = ' (тариф «Включи мобильный»)' if white_flag else ''
             gift_message = lexicon["payment_gift"].format(duration, marker, gift_id)
 
@@ -284,6 +339,8 @@ async def process_confirmed_payment(payload):
             )
             if tracker_pay_uid is not None:
                 await post_payment_success(tracker_pay_uid, method, amount)
+
+            await _credit_partner_commission(db_uid, method, amount)
 
             if notify_tg is not None and notify_tg > 0:
                 try:

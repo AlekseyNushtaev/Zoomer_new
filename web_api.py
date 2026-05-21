@@ -162,7 +162,8 @@ _CORS_ORIGIN_REGEX = os.environ.get(
     "CORS_ORIGIN_REGEX",
     r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
     r"|^https://[a-z0-9-]+\.(ngrok-free\.dev|ngrok-free\.app|ngrok\.io|trycloudflare\.com|loca\.lt)$"
-    r"|^https://(www\.)?4zoomer\.top$",
+    r"|^https://(www\.)?4zoomer\.top$"
+    r"|^https://([a-z0-9-]+\.)?zoomersky\.online$",
 )
 
 app.add_middleware(
