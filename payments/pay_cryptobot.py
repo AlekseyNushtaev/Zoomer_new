@@ -50,7 +50,7 @@ class CryptoBotPayment:
                             return {
                                 'status': 'pending',
                                 'url': inv['pay_url'],
-                                'invoice_id': inv['invoice_id'],
+                                'invoice_id': str(inv['invoice_id']),
                                 'payload': payload
                             }
                         else:
@@ -125,7 +125,7 @@ async def create_cryptobot_payment(
                 amount=float(rub_amount),
                 currency="RUB",
                 is_gift=is_gift,
-                invoice_id=result['invoice_id'],
+                invoice_id=str(result['invoice_id']),
                 payload=payload
             )
         except Exception as e:
