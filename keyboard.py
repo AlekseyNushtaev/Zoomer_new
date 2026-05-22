@@ -83,7 +83,7 @@ def keyboard_start():
         },
         buy_vpn='💰 Купить подписку',
         connect_vpn='🔗 Подключить VPN',
-        ref='🎁 Бесплатный VPN за приглашения',
+        ref='👭 Бесплатный VPN за приглашения',
         buy_gift='🎁 Подарить подписку',
     )
     rows = list(markup.inline_keyboard)
