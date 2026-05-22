@@ -22,6 +22,26 @@ router = Router()
 # Полная видимость длинных полей (payload, transaction id, crypto-идентификаторы и т.п.) в Excel
 _EXCEL_COL_WIDTH_MAX = 255
 
+_USERS_EXPORT_PARTNER_EXCLUDED = frozenset({
+    "email",
+    "password",
+    "password_hash",
+    "linked_telegram_id",
+    "activation_pass",
+    "field_str_1",
+    "field_str_2",
+    "field_str_3",
+    "field_bool_1",
+    "field_bool_2",
+    "field_bool_3",
+    "ttclid",
+    "subscribtion",
+    "white_subscription",
+    "last_broadcast_status",
+    "last_broadcast_date",
+    "in_chanel",
+})
+
 _USERS_EXPORT_COLUMNS_DEFAULT = (
     "id",
     "user_id",
@@ -45,7 +65,11 @@ _USERS_EXPORT_COLUMNS_DEFAULT = (
 
 def _user_sheet_column_names(users_full_columns: bool) -> list[str]:
     if users_full_columns:
-        return [c.key for c in Users.__table__.columns]
+        return [
+            c.key
+            for c in Users.__table__.columns
+            if c.key not in _USERS_EXPORT_PARTNER_EXCLUDED
+        ]
     return list(_USERS_EXPORT_COLUMNS_DEFAULT)
 
 
@@ -60,14 +84,14 @@ def _excel_scalar(value):
 
 
 async def _export_database_to_excel_impl(message: Message, *, users_full_columns: bool) -> None:
-    """Экспорт базы в Excel; при users_full_columns на листе users все колонки таблицы."""
+    """Экспорт базы в Excel; при users_full_columns на листе users почти все колонки (без чувствительных)."""
     if message.from_user.id not in ADMIN_IDS:
         await message.answer("❌ Эта команда доступна только администраторам.")
         return
 
     try:
         start_msg = (
-            "🔄 Начинаю экспорт базы данных (лист users — все колонки)..."
+            "🔄 Начинаю экспорт базы данных (лист users — для партнёра)..."
             if users_full_columns
             else "🔄 Начинаю экспорт базы данных..."
         )
@@ -475,7 +499,7 @@ async def _export_database_to_excel_impl(message: Message, *, users_full_columns
         try:
             now_s = datetime.now().strftime('%d.%m.%Y %H:%M')
             users_sheet_note = (
-                "🧾 Лист <code>users</code>: все колонки таблицы.\n"
+                "🧾 Лист <code>users</code>: расширенный набор колонок (без паролей и служебных полей).\n"
                 if users_full_columns
                 else ""
             )
@@ -508,7 +532,7 @@ async def _export_database_to_excel_impl(message: Message, *, users_full_columns
             except OSError:
                 pass
 
-        suffix = " (export_full)" if users_full_columns else ""
+        suffix = " (export_partner)" if users_full_columns else ""
         logger.info(f"Администратор {message.from_user.id} экспортировал базу данных в Excel{suffix}")
 
     except Exception as e:
@@ -524,9 +548,9 @@ async def export_database_to_excel(message: Message):
     await _export_database_to_excel_impl(message, users_full_columns=False)
 
 
-@router.message(Command(commands=["export_full"]))
-async def export_full_database_to_excel(message: Message):
-    """Как /export, но лист users со всеми колонками таблицы users."""
+@router.message(Command(commands=["export_partner"]))
+async def export_partner_database_to_excel(message: Message):
+    """Как /export, но лист users с расширенным набором колонок (без чувствительных полей)."""
     await _export_database_to_excel_impl(message, users_full_columns=True)
 
 

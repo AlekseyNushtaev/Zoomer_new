@@ -1,5 +1,5 @@
 """
-Импорт БД из Excel, полученного через /export_full (или /export по листу users).
+Импорт БД из Excel, полученного через /export_partner (или /export по листу users).
 Только админы. Команда /import_excel — затем отправьте .xlsx следующим сообщением.
 """
 from __future__ import annotations
@@ -504,7 +504,7 @@ async def import_excel_start(message: Message) -> None:
         return
     _WAITING_IMPORT_EXCEL.add(message.from_user.id)
     await message.answer(
-        "📥 Отправьте файл <b>.xlsx</b> (желательно из <code>/export_full</code>) "
+        "📥 Отправьте файл <b>.xlsx</b> (желательно из <code>/export_partner</code>) "
         "<b>следующим сообщением</b>.\n\n"
         "⚠️ Все текущие данные в таблицах users, платежах, gifts, online, white_counter "
         "будут <b>удалены</b> и заменены содержимым файла.\n\n"

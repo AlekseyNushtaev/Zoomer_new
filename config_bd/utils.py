@@ -2290,7 +2290,7 @@ class AsyncSQL:
         white_counter: List[WhiteCounter],
     ) -> Dict[str, int]:
         """
-        Полная замена данных таблиц, которые попадают в /export_full: TRUNCATE … RESTART IDENTITY,
+        Полная замена данных таблиц, которые попадают в /export_partner: TRUNCATE … RESTART IDENTITY,
         затем вставка списков ORM-объектов. Таблицы linking_codes / password_reset_codes не трогаются.
         """
         batch = 500
