@@ -326,10 +326,6 @@ async def trial_return_get_cb(callback: CallbackQuery):
         await callback.answer("Вы уже взяли свой триал!", show_alert=True)
         return
 
-    if _user_has_active_pro_subscription(user_data) or await _panel_regular_subscription_is_active(uid):
-        await callback.answer("У вас уже есть активная подписка PRO.", show_alert=True)
-        return
-
     await callback.answer()
 
     user_id_str = str(uid)
