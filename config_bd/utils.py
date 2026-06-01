@@ -1002,12 +1002,13 @@ class AsyncSQL:
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]
 
-    async def SELECT_USER_IDS_PANEL_EXPIRED_REGULAR_SUBSCRIPTION(self) -> List[int]:
+    async def SELECT_USER_IDS_NO_ACTIVE_PRO_SUBSCRIPTION(self) -> List[int]:
         """
-        В панели, не удалены, обычная подписка по календарю UTC истекла или даты нет.
+        Не удалены; нет активной PRO-подписки: subscription_end_date пусто
+        или календарный день окончания (UTC) строго раньше сегодня UTC.
         """
         today_utc = datetime.now(timezone.utc).date()
-        expired = or_(
+        no_active_pro = or_(
             Users.subscription_end_date.is_(None),
             cast(Users.subscription_end_date, Date) < today_utc,
         )
@@ -1016,8 +1017,7 @@ class AsyncSQL:
                 select(Users.user_id)
                 .where(
                     Users.is_delete == False,
-                    Users.in_panel == True,
-                    expired,
+                    no_active_pro,
                 )
                 .order_by(Users.user_id)
             )

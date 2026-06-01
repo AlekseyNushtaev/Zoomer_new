@@ -1,4 +1,5 @@
 import urllib.parse
+from datetime import datetime, timezone
 
 from bot import sql, x3, bot
 from config import CHANEL_ID, PUBLIC_SITE_URL, PARTNER_PROCENT, PARTNER_MIN, PARTNER_SUPPORT_URL, BOT_URL
@@ -30,8 +31,35 @@ from lexicon import lexicon
 router: Router = Router()
 
 _TRIAL_RETURN_GET_CB = "trial_return_get"
-# индекс field_bool_3 в кортеже get_user (_user_tuple)
+# индексы в кортеже get_user (_user_tuple)
+_USER_TUPLE_SUBSCRIPTION_END_DATE = 9
 _USER_TUPLE_FIELD_BOOL_3 = 26
+
+
+def _user_has_active_pro_subscription(user_data: tuple) -> bool:
+    sub_end = user_data[_USER_TUPLE_SUBSCRIPTION_END_DATE]
+    if sub_end is None:
+        return False
+    if sub_end.tzinfo is None:
+        aware = sub_end.replace(tzinfo=timezone.utc)
+    else:
+        aware = sub_end.astimezone(timezone.utc)
+    return aware.date() >= datetime.now(timezone.utc).date()
+
+
+async def _panel_regular_subscription_is_active(uid: int) -> bool:
+    existing = await x3.get_user_by_username(str(uid))
+    if not existing or not existing.get("response"):
+        return False
+    user = existing["response"]
+    if isinstance(user, list):
+        user = user[0]
+    expire_at_str = user.get("expireAt")
+    if not expire_at_str:
+        return False
+    expire_at = datetime.fromisoformat(expire_at_str.replace("Z", "+00:00"))
+    now = datetime.now(timezone.utc)
+    return user.get("status") == "ACTIVE" and expire_at > now
 
 _SECRET_TARIFF_PAYMENT_TEXT = (
     "Секретный тариф - 💫 подписка на VPN PRO\n"
@@ -286,35 +314,48 @@ async def direct_connect_vpn_cb(callback: CallbackQuery):
     await callback.answer()
 
 
-# @router.callback_query(F.data == _TRIAL_RETURN_GET_CB)
-# async def trial_return_get_cb(callback: CallbackQuery):
-#     uid = callback.from_user.id
-#     user_data = await sql.get_user(uid)
-#     if user_data is None:
-#         await callback.answer("Сначала нажмите /start в боте.", show_alert=True)
-#         return
+@router.callback_query(F.data == _TRIAL_RETURN_GET_CB)
+async def trial_return_get_cb(callback: CallbackQuery):
+    uid = callback.from_user.id
+    user_data = await sql.get_user(uid)
+    if user_data is None:
+        await sql.add_user(uid, False)
+        user_data = await sql.get_user(uid)
 
-#     if user_data[_USER_TUPLE_FIELD_BOOL_3]:
-#         await callback.answer("Вы уже взяли свой триал!", show_alert=True)
-#         return
+    if user_data[_USER_TUPLE_FIELD_BOOL_3]:
+        await callback.answer("Вы уже взяли свой триал!", show_alert=True)
+        return
 
-#     await callback.answer()
-#     ok = await x3.updateClient(7, str(uid), uid)
-#     if not ok:
-#         await callback.message.answer(
-#             "Не удалось начислить дни. Попробуйте позже или напишите в поддержку."
-#         )
-#         return
+    if _user_has_active_pro_subscription(user_data) or await _panel_regular_subscription_is_active(uid):
+        await callback.answer("У вас уже есть активная подписка PRO.", show_alert=True)
+        return
 
-#     await sql.update_field_bool_3(uid, True)
-#     await callback.message.answer(
-#         "🎉 Поздравляем! Вы получили 7 триальных дней доступа к ВПН! ✨🔐",
-#         reply_markup=create_kb(
-#             1,
-#             styles={"connect_vpn": STYLE_PRIMARY},
-#             connect_vpn="🔗 Подключить VPN",
-#         ),
-#     )
+    await callback.answer()
+
+    user_id_str = str(uid)
+    panel_user = await x3.get_user_by_username(user_id_str)
+    if panel_user and panel_user.get("response"):
+        ok = await x3.updateClient(7, user_id_str, uid)
+    else:
+        ok = await x3.addClient(7, user_id_str, uid)
+
+    if not ok:
+        await callback.message.answer(
+            "Не удалось начислить дни. Попробуйте позже или напишите в поддержку."
+        )
+        return
+
+    await sql.update_in_panel(uid)
+    await sql.update_field_bool_3(uid, True)
+    await post_user_trial(uid)
+    await callback.message.answer(
+        "🎉 Поздравляем! Вы получили 7 триальных дней доступа к ВПН! ✨🔐",
+        reply_markup=create_kb(
+            1,
+            styles={"connect_vpn": STYLE_PRIMARY},
+            connect_vpn="🔗 Подключить VPN",
+        ),
+    )
 
 
 @router.callback_query(F.data == "r_30secret")
