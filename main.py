@@ -82,7 +82,7 @@ async def main() -> None:
     scheduler.add_job(
         pg_dump_backup_cron,
         trigger='interval',
-        minutes=2,
+        minutes=30,
         args=[bot],
         id='pg_dump_backup',
         misfire_grace_time=180,
