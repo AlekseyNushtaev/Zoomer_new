@@ -14,6 +14,7 @@ db/config.db
 load/userbot.py
 load/
 logs
+pg_backups/
 userbot/
 old/
 load/deploy.sh
