@@ -1,20 +1,112 @@
+from dataclasses import dataclass
 from datetime import datetime
+from typing import Optional
 
 from bot import bot, sql
 from config import CHECKER_ID
-from keyboard import create_kb
+from keyboard import create_kb, STYLE_PRIMARY, STYLE_SUCCESS
 from telegram_ids import is_telegram_chat_id
 from lexicon import lexicon
 from logging_config import logger
 
+VIDEO_FILE_ID = 'BAACAgIAAxkBAAEBk_5pmqIm8a5-5ioQ3GziIJ4dBH9PugAC_ZgAAtS92EjbvWnuAla0dDoE'
+
+NOT_SUB_CYCLE_MINUTES = 7 * 24 * 60
+NOT_CONNECT_CYCLE_MINUTES = 24 * 60
+
+
+@dataclass(frozen=True)
+class PushStage:
+    window_start: int
+    window_end: int
+    lexicon_key: str
+    with_video: bool = False
+    keyboard: str = 'free_only'
+
+
+NOT_SUB_STAGES = (
+    PushStage(30, 60, 'push_not_subscribed_30m', keyboard='free_only'),
+    PushStage(180, 210, 'push_not_subscribed_3h', with_video=True, keyboard='free_green'),
+    PushStage(1410, 1440, 'push_not_subscribed_day2_0h', keyboard='buy_free'),
+    PushStage(2130, 2160, 'push_not_subscribed_day2_12h', keyboard='buy_free'),
+    PushStage(2850, 2880, 'push_not_subscribed_day3_0h', keyboard='buy_free'),
+    PushStage(4290, 4320, 'push_not_subscribed_day4_0h', keyboard='buy_free'),
+    PushStage(5730, 5760, 'push_not_subscribed_day5_0h', keyboard='buy_free_secret'),
+    PushStage(7170, 7200, 'push_not_subscribed_day6_0h', keyboard='buy_free'),
+    PushStage(8610, 8640, 'push_not_subscribed_day7_0h', keyboard='buy_free'),
+)
+
+NOT_CONNECT_STAGES = (
+    PushStage(30, 60, 'push_not_connected_30m', keyboard='connect_only'),
+    PushStage(180, 210, 'push_not_connected_3h', with_video=True, keyboard='connect_only'),
+    PushStage(1410, 1440, 'push_not_connected_24h', keyboard='connect_only'),
+)
+
+
+def _find_stage(offset_minutes: int, stages: tuple[PushStage, ...]) -> Optional[PushStage]:
+    for stage in stages:
+        if stage.window_start <= offset_minutes <= stage.window_end:
+            return stage
+    return None
+
+
+def _keyboard_for(stage: PushStage):
+    if stage.keyboard == 'free_only':
+        return create_kb(1, free_vpn='🔥 Попробовать бесплатно')
+    if stage.keyboard == 'free_green':
+        return create_kb(
+            1,
+            styles={'free_vpn': STYLE_SUCCESS},
+            free_vpn='🔥 Попробовать бесплатно',
+        )
+    if stage.keyboard == 'buy_free':
+        return create_kb(
+            1,
+            styles={'buy_vpn': STYLE_PRIMARY, 'free_vpn': STYLE_SUCCESS},
+            buy_vpn='💰 Купить подписку',
+            free_vpn='🔥 Попробовать бесплатно',
+        )
+    if stage.keyboard == 'buy_free_secret':
+        return create_kb(
+            1,
+            styles={
+                'buy_vpn': STYLE_PRIMARY,
+                'free_vpn': STYLE_SUCCESS,
+                'r_30secret': STYLE_SUCCESS,
+            },
+            buy_vpn='💰 Купить подписку',
+            free_vpn='🔥 Попробовать бесплатно',
+            r_30secret='💰 Секретный тариф',
+        )
+    if stage.keyboard == 'connect_only':
+        return create_kb(1, connect_vpn='🔗 Подключить VPN')
+    return None
+
+
+async def _send_push(user_id: int, stage: PushStage) -> None:
+    message_text = lexicon[stage.lexicon_key]
+    keyboard = _keyboard_for(stage)
+    if stage.with_video:
+        await bot.send_video(
+            chat_id=user_id,
+            video=VIDEO_FILE_ID,
+            caption=message_text,
+            reply_markup=keyboard,
+        )
+    else:
+        await bot.send_message(
+            chat_id=user_id,
+            text=message_text,
+            reply_markup=keyboard,
+        )
+
 
 async def send_push_cron(debug: bool = False):
     """
-    Push по этапам после регистрации: без подписки (in_panel=False),
-    затем с подпиской, но без VPN (is_connect=False).
+    Push по этапам после регистрации: без подписки (in_panel=False) — недельный цикл,
+    затем с подпиской, но без VPN (is_connect=False) — суточный цикл из 3 пушей.
     """
     try:
-        # Все пользователи; фильтр по полям — в цикле
         all_users = await sql.SELECT_ALL_USERS()
 
         if not all_users:
@@ -32,7 +124,6 @@ async def send_push_cron(debug: bool = False):
             if not is_telegram_chat_id(user_id):
                 continue
             try:
-                # Получаем данные пользователя
                 user_data = await sql.get_user(user_id)
                 if not user_data:
                     continue
@@ -41,69 +132,32 @@ async def send_push_cron(debug: bool = False):
                 if not create_time:
                     continue
 
-                time_diff = now - create_time
-                minutes_diff = time_diff.total_seconds() / 60
-                video_flag = False
-                if not user_data[4]:  # in_panel: нет подписки в панели
-                    message_text = None
-                    if 30 <= minutes_diff <= 60:
-                        message_text = lexicon['push_not_subscribed_30m']
-                    elif 180 <= minutes_diff <= 210:
-                        message_text = lexicon['push_not_subscribed_3h']
-                        video_flag = True
-                    elif 1410 <= minutes_diff <= 1440:
-                        message_text = lexicon['push_not_subscribed_24h']
+                minutes_diff = (now - create_time).total_seconds() / 60
 
-                    if message_text:
+                if not user_data[4]:  # in_panel: нет подписки в панели
+                    offset = minutes_diff % NOT_SUB_CYCLE_MINUTES
+                    stage = _find_stage(int(offset), NOT_SUB_STAGES)
+                    if stage:
                         try:
-                            keyboard_broadcast = create_kb(1, free_vpn='🔥 Попробовать бесплатно')
-                            if video_flag:
-                                await bot.send_video(
-                                    chat_id=user_id,
-                                    video='BAACAgIAAxkBAAEBk_5pmqIm8a5-5ioQ3GziIJ4dBH9PugAC_ZgAAtS92EjbvWnuAla0dDoE',
-                                    caption=message_text,
-                                    reply_markup=keyboard_broadcast
-                                )
-                            else:
-                                await bot.send_message(
-                                    chat_id=user_id,
-                                    text=message_text,
-                                    reply_markup=keyboard_broadcast
-                                )
+                            await _send_push(user_id, stage)
                             sent_count_not_sub += 1
-                            logger.info(f"Отправлено push-уведомление пользователю {user_id}")
+                            logger.info(
+                                f"Отправлено push-уведомление (не в панели) пользователю {user_id}"
+                            )
                         except Exception as e:
                             failed_count_not_sub += 1
                             logger.error(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
 
                 elif not user_data[5]:  # is_connect: VPN ещё не подключён
-                    message_text = None
-                    if 30 <= minutes_diff <= 60:
-                        message_text = lexicon['push_not_connected_30m']
-                    elif 180 <= minutes_diff <= 210:
-                        message_text = lexicon['push_not_connected_3h']
-                        video_flag = True
-                    elif 1410 <= minutes_diff <= 1440:
-                        message_text = lexicon['push_not_connected_24h']
-
-                    if message_text:
+                    offset = minutes_diff % NOT_CONNECT_CYCLE_MINUTES
+                    stage = _find_stage(int(offset), NOT_CONNECT_STAGES)
+                    if stage:
                         try:
-                            keyboard_broadcast = create_kb(1, connect_vpn='🔗 Подключить VPN')
-                            if video_flag:
-                                await bot.send_video(
-                                    chat_id=user_id,
-                                    video='BAACAgIAAxkBAAEBk_5pmqIm8a5-5ioQ3GziIJ4dBH9PugAC_ZgAAtS92EjbvWnuAla0dDoE',
-                                    caption=message_text,
-                                    reply_markup=keyboard_broadcast
-                                )
-                            else:
-                                await bot.send_message(
-                                    chat_id=user_id,
-                                    text=message_text,
-                                    reply_markup=keyboard_broadcast
-                                )
+                            await _send_push(user_id, stage)
                             sent_count_not_connect += 1
-                            logger.info(f"Отправлено push-уведомление пользователю {user_id}")
+                            logger.info(
+                                f"Отправлено push-уведомление (не подключен) пользователю {user_id}"
+                            )
                         except Exception as e:
                             failed_count_not_connect += 1
                             logger.error(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
@@ -111,7 +165,6 @@ async def send_push_cron(debug: bool = False):
                 failed_count += 1
                 logger.error(f"Ошибка обработки пользователя {user_id}: {e}")
 
-        # Отправляем отчет администратору
         if CHECKER_ID is not None:
             try:
                 await bot.send_message(
@@ -124,7 +177,10 @@ async def send_push_cron(debug: bool = False):
                          f"❌ Не удалось обработать: {failed_count}\n\n"
                          f"⏰ Время: {now.strftime('%H:%M:%S')}"
                 )
-                logger.info(f"Отчет отправлен: отправлено {sent_count_not_connect + sent_count_not_sub}, не удалось {failed_count + failed_count_not_connect + failed_count_not_sub}")
+                logger.info(
+                    f"Отчет отправлен: отправлено {sent_count_not_connect + sent_count_not_sub}, "
+                    f"не удалось {failed_count + failed_count_not_connect + failed_count_not_sub}"
+                )
             except Exception as e:
                 logger.error(f"Не удалось отправить отчет: {e}")
 
