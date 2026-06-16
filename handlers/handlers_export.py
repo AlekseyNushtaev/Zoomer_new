@@ -83,21 +83,27 @@ def _excel_scalar(value):
     return value
 
 
-async def _export_database_to_excel_impl(message: Message, *, users_full_columns: bool) -> None:
+async def _export_database_to_excel_impl(
+    message: Message,
+    *,
+    users_full_columns: bool,
+    include_users: bool = True,
+) -> None:
     """Экспорт базы в Excel; при users_full_columns на листе users почти все колонки (без чувствительных)."""
     if message.from_user.id not in ADMIN_IDS:
         await message.answer("❌ Эта команда доступна только администраторам.")
         return
 
     try:
-        start_msg = (
-            "🔄 Начинаю экспорт базы данных (лист users — для партнёра)..."
-            if users_full_columns
-            else "🔄 Начинаю экспорт базы данных..."
-        )
+        if not include_users:
+            start_msg = "🔄 Начинаю быстрый экспорт (без таблицы users)..."
+        elif users_full_columns:
+            start_msg = "🔄 Начинаю экспорт базы данных (лист users — для партнёра)..."
+        else:
+            start_msg = "🔄 Начинаю экспорт базы данных..."
         await message.answer(start_msg)
 
-        snapshot = await sql.get_export_snapshot()
+        snapshot = await sql.get_export_snapshot(include_users=include_users)
 
         def _sync_build_export() -> str:
             users_list = snapshot["users"]
@@ -117,34 +123,34 @@ async def _export_database_to_excel_impl(message: Message, *, users_full_columns
             if 'Sheet' in wb.sheetnames:
                 wb.remove(wb['Sheet'])
 
-            # --- Лист USERS ---
-            ws_users = wb.create_sheet(title="users")
-            users_columns = _user_sheet_column_names(users_full_columns)
             header_alignment = Alignment(horizontal="center", vertical="center")
             thin_border = Border(left=Side(style='thin'), right=Side(style='thin'),
                                  top=Side(style='thin'), bottom=Side(style='thin'))
 
-            # Заголовки
-            for col_num, title in enumerate(users_columns, 1):
-                cell = ws_users.cell(row=1, column=col_num, value=title)
-                cell.alignment = header_alignment
-                cell.border = thin_border
+            ws_users = None
+            if include_users:
+                # --- Лист USERS ---
+                ws_users = wb.create_sheet(title="users")
+                users_columns = _user_sheet_column_names(users_full_columns)
 
-            # Данные
-            for row_num, user in enumerate(users_list, 2):
-                row_data = [_excel_scalar(getattr(user, name)) for name in users_columns]
-                for col_num, value in enumerate(row_data, 1):
-                    cell = ws_users.cell(row=row_num, column=col_num, value=value)
+                for col_num, title in enumerate(users_columns, 1):
+                    cell = ws_users.cell(row=1, column=col_num, value=title)
+                    cell.alignment = header_alignment
                     cell.border = thin_border
 
-            # Автоширина
-            for col in ws_users.columns:
-                max_len = 0
-                col_letter = col[0].column_letter
-                for cell in col:
-                    if cell.value:
-                        max_len = max(max_len, len(str(cell.value)))
-                ws_users.column_dimensions[col_letter].width = min(max_len + 2, _EXCEL_COL_WIDTH_MAX)
+                for row_num, user in enumerate(users_list, 2):
+                    row_data = [_excel_scalar(getattr(user, name)) for name in users_columns]
+                    for col_num, value in enumerate(row_data, 1):
+                        cell = ws_users.cell(row=row_num, column=col_num, value=value)
+                        cell.border = thin_border
+
+                for col in ws_users.columns:
+                    max_len = 0
+                    col_letter = col[0].column_letter
+                    for cell in col:
+                        if cell.value:
+                            max_len = max(max_len, len(str(cell.value)))
+                    ws_users.column_dimensions[col_letter].width = min(max_len + 2, _EXCEL_COL_WIDTH_MAX)
 
             # --- Лист PAYMENTS (Platega) ---
             ws_payments = wb.create_sheet(title="payments_sbp")
@@ -449,8 +455,13 @@ async def _export_database_to_excel_impl(message: Message, *, users_full_columns
                 ws_white_counter.column_dimensions[col_letter].width = min(max_len + 2, _EXCEL_COL_WIDTH_MAX)
 
             # Заморозка заголовков
-            for ws in [ws_users, ws_payments, ws_payments_cards, ws_payments_stars, ws_platega_crypto,
-                       ws_fk_sbp, ws_wata_sbp, ws_wata_card, ws_payments_cryptobot, ws_gifts, ws_online, ws_white_counter]:
+            sheets_to_freeze = [
+                ws_payments, ws_payments_cards, ws_payments_stars, ws_platega_crypto,
+                ws_fk_sbp, ws_wata_sbp, ws_wata_card, ws_payments_cryptobot, ws_gifts, ws_online, ws_white_counter,
+            ]
+            if ws_users is not None:
+                sheets_to_freeze.insert(0, ws_users)
+            for ws in sheets_to_freeze:
                 ws.freeze_panes = ws['A2']
 
             fd, path = tempfile.mkstemp(suffix=".xlsx")
@@ -470,7 +481,7 @@ async def _export_database_to_excel_impl(message: Message, *, users_full_columns
         payments_fk_sbp_list = snapshot["payments_fk_sbp"]
         payments_cryptobot_list = snapshot["payments_cryptobot"]
 
-        users_count = len(users_list)
+        users_count = len(users_list) if include_users else None
         gifts_count = len(gifts_list)
         payments_count = len(payments_list)
         payments_cards_count = len(payments_cards_list)
@@ -481,8 +492,10 @@ async def _export_database_to_excel_impl(message: Message, *, users_full_columns
         payments_wata_sbp_count = len(payments_wata_sbp_list)
         payments_wata_card_count = len(payments_wata_card_list)
         payments_fk_sbp_count = len(payments_fk_sbp_list)
-        white_subscription_count = sum(
-            1 for u in users_list if u.white_subscription_end_date is not None
+        white_subscription_count = (
+            sum(1 for u in users_list if u.white_subscription_end_date is not None)
+            if include_users
+            else None
         )
 
         successful_payments_count = sum(1 for p in payments_list if p.status == "confirmed")
@@ -498,17 +511,24 @@ async def _export_database_to_excel_impl(message: Message, *, users_full_columns
 
         try:
             now_s = datetime.now().strftime('%d.%m.%Y %H:%M')
-            users_sheet_note = (
-                "🧾 Лист <code>users</code>: расширенный набор колонок (без паролей и служебных полей).\n"
-                if users_full_columns
-                else ""
+            if not include_users:
+                users_sheet_note = "⚡ Без таблицы <code>users</code>.\n"
+            elif users_full_columns:
+                users_sheet_note = (
+                    "🧾 Лист <code>users</code>: расширенный набор колонок (без паролей и служебных полей).\n"
+                )
+            else:
+                users_sheet_note = ""
+            users_stats_line = f"├ 👥 Пользователей: {users_count}\n" if include_users else ""
+            white_sub_line = (
+                f"├ ⚪ White-подписок: {white_subscription_count}\n" if include_users else ""
             )
             caption = (
                 "📊 Экспорт базы данных\n"
                 f"{users_sheet_note}"
                 f"📅 Создано: {now_s}\n\n"
                 "📊 Статистика:\n"
-                f"├ 👥 Пользователей: {users_count}\n"
+                f"{users_stats_line}"
                 f"├ 🎁 Подарков: {gifts_count}\n"
                 f"├ ⚡ Платежей Platega СБП: {successful_payments_count}/{payments_count}\n"
                 f"├ 💳 Платежей Platega Карта: {successful_cards_count}/{payments_cards_count}\n"
@@ -518,7 +538,7 @@ async def _export_database_to_excel_impl(message: Message, *, users_full_columns
                 f"├ 💳 Платежей WATA Карта: {successful_wata_card_count}/{payments_wata_card_count}\n"
                 f"├ 💳 Платежей FreeKassa (СБП/карта QR): {successful_fk_sbp_count}/{payments_fk_sbp_count}\n"
                 f"├ 💎 Платежей Криптоботом: {successful_cryptobot_count}/{payments_cryptobot_count}\n"
-                f"├ ⚪ White-подписок: {white_subscription_count}\n"
+                f"{white_sub_line}"
                 f"└ 👁 White-кликов: {white_counter_count}"
             )
             await message.answer_document(
@@ -532,7 +552,12 @@ async def _export_database_to_excel_impl(message: Message, *, users_full_columns
             except OSError:
                 pass
 
-        suffix = " (export_partner)" if users_full_columns else ""
+        if not include_users:
+            suffix = " (export_fast)"
+        elif users_full_columns:
+            suffix = " (export_partner)"
+        else:
+            suffix = ""
         logger.info(f"Администратор {message.from_user.id} экспортировал базу данных в Excel{suffix}")
 
     except Exception as e:
@@ -552,6 +577,12 @@ async def export_database_to_excel(message: Message):
 async def export_partner_database_to_excel(message: Message):
     """Как /export, но лист users с расширенным набором колонок (без чувствительных полей)."""
     await _export_database_to_excel_impl(message, users_full_columns=True)
+
+
+@router.message(Command(commands=["export_fast"]))
+async def export_fast_database_to_excel(message: Message):
+    """Как /export, но без таблицы users (быстрее на больших базах)."""
+    await _export_database_to_excel_impl(message, users_full_columns=False, include_users=False)
 
 
 MSK = ZoneInfo("Europe/Moscow")

@@ -2239,15 +2239,18 @@ class AsyncSQL:
             result = await session.execute(select(WhiteCounter))
             return result.scalars().all()
 
-    async def get_export_snapshot(self) -> Dict[str, List[Any]]:
+    async def get_export_snapshot(self, *, include_users: bool = True) -> Dict[str, List[Any]]:
         """
         Одна сессия БД: все SELECT для /export подряд.
         Меньше открытий соединения, чем несколько отдельных get_all_*.
+        При include_users=False таблица users не читается (/export_fast).
         """
         async with self.session_factory() as session:
-            users_list = (
-                await session.execute(select(Users).order_by(Users.create_user.asc()))
-            ).scalars().all()
+            users_list: List[Any] = []
+            if include_users:
+                users_list = (
+                    await session.execute(select(Users).order_by(Users.create_user.asc()))
+                ).scalars().all()
             payments_list = (await session.execute(select(Payments))).scalars().all()
             payments_cards_list = (await session.execute(select(PaymentsCards))).scalars().all()
             payments_platega_crypto_list = (await session.execute(select(PaymentsPlategaCrypto))).scalars().all()
