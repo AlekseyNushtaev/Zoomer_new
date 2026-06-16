@@ -10,6 +10,8 @@ STYLE_PRIMARY = "primary"
 STYLE_SUCCESS = "success"
 STYLE_DANGER = "danger"
 
+BTN_BACK = "◀️ Назад"
+
 SITE_URL = "https://4zoomer.top/"
 OPEN_SITE_CB = "open_site"
 
@@ -78,11 +80,13 @@ def keyboard_start():
         styles={
             "buy_vpn": STYLE_SUCCESS,
             "connect_vpn": STYLE_PRIMARY,
+            "manage_devices": STYLE_PRIMARY,
             "ref": STYLE_PRIMARY,
             "buy_gift": STYLE_SUCCESS,
         },
         buy_vpn='💰 Купить подписку',
         connect_vpn='🔗 Подключить VPN',
+        manage_devices='📱 Управление устройствами',
         ref='👭 Бесплатный VPN за приглашения',
         buy_gift='🎁 Подарить подписку',
     )
@@ -581,6 +585,43 @@ def keyboard_partner_dashboard():
         partner_withdraw='💰 Создать заявку на вывод',
         back_to_main='🔙 Назад',
     )
+
+
+def keyboard_devices_subscriptions(slots: list[tuple[str, str]]) -> InlineKeyboardMarkup:
+    """slots: (ключ слота, текст кнопки)."""
+    buttons = []
+    for slot_key, label in slots:
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=label[:64],
+                    callback_data=f"dev_sub_{slot_key}",
+                    style=STYLE_PRIMARY,
+                )
+            ]
+        )
+    buttons.append([InlineKeyboardButton(text=BTN_BACK, callback_data="dev_back_main")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def keyboard_devices_list(
+    slot_key: str,
+    devices: list[tuple[int, str]],
+) -> InlineKeyboardMarkup:
+    """devices: (индекс, текст кнопки)."""
+    buttons = []
+    for idx, btn_text in devices:
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=btn_text[:64],
+                    callback_data=f"dev_rm_{slot_key}_{idx}",
+                    style=STYLE_DANGER,
+                )
+            ]
+        )
+    buttons.append([InlineKeyboardButton(text=BTN_BACK, callback_data="dev_back_subs")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def keyboard_partner_withdraw(support_url: str):

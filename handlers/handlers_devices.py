@@ -1,0 +1,257 @@
+from __future__ import annotations
+
+import re
+from html import escape
+from typing import Any
+
+from aiogram import F, Router
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
+
+from bot import x3
+from keyboard import (
+    BTN_BACK,
+    keyboard_devices_list,
+    keyboard_devices_subscriptions,
+    keyboard_start,
+)
+from lexicon import lexicon
+from logging_config import logger
+
+router = Router()
+
+_DEV_SUB_RE = re.compile(r"^dev_sub_(main|white)$")
+_DEV_RM_RE = re.compile(r"^dev_rm_(main|white)_(\d+)$")
+
+
+def _device_button_label(device: dict[str, Any]) -> str:
+    model = (device.get("deviceModel") or "").strip()
+    platform = (device.get("platform") or "").strip()
+    os_version = (device.get("osVersion") or "").strip()
+
+    if model and platform:
+        name = f"{model} · {platform}"
+    elif model:
+        name = model
+    elif platform:
+        name = platform
+    else:
+        hwid = (device.get("hwid") or "устройство")[:12]
+        name = f"Устройство {hwid}"
+
+    if os_version:
+        name = f"{name} {os_version}"
+
+    return f"📱 {name}"[:64]
+
+
+def _device_line(device: dict[str, Any], index: int) -> str:
+    model = (device.get("deviceModel") or "").strip()
+    platform = (device.get("platform") or "").strip()
+    os_version = (device.get("osVersion") or "").strip()
+
+    parts = [p for p in (model, platform, os_version) if p]
+    if parts:
+        return f"{index}. {escape(' · '.join(parts))}"
+    hwid = escape((device.get("hwid") or "—")[:16])
+    return f"{index}. Устройство <code>{hwid}</code>"
+
+
+async def _active_slots(telegram_id: int) -> list[tuple[str, str, str]]:
+    slots = await x3.active_subscription_slots(telegram_id)
+    return [(slot_key, label, user_uuid) for slot_key, label, user_uuid, _username in slots]
+
+
+async def _slot_context(telegram_id: int, slot_key: str) -> tuple[str, str, str] | None:
+    for sk, label, user_uuid, username in await x3.active_subscription_slots(telegram_id):
+        if sk == slot_key:
+            return label, user_uuid, username
+    return None
+
+
+def _subscriptions_text() -> str:
+    return (
+        "📱 <b>Управление устройствами</b>\n\n"
+        "Выберите подписку:"
+    )
+
+
+def _no_subscriptions_text() -> str:
+    return "У вас нет активных подписок"
+
+
+async def _devices_screen_text(
+    label: str,
+    user_uuid: str,
+    username: str,
+) -> tuple[str, list[dict[str, Any]], list[tuple[int, str]]]:
+    user_data = await x3.get_user_by_username(username)
+    user = x3._panel_user_from_response(user_data)
+    device_limit = (user or {}).get("hwidDeviceLimit")
+
+    devices, total = await x3.get_user_hwid_devices(user_uuid)
+
+    lines = [f"<b>{escape(label)}</b>", ""]
+    if total == 0:
+        lines.append("Нет подключённых устройств.")
+    else:
+        limit_suffix = ""
+        if device_limit is not None:
+            limit_suffix = f" ({total}/{device_limit})"
+        lines.append(f"Подключённые устройства{limit_suffix}:")
+        lines.append("")
+        for idx, device in enumerate(devices, start=1):
+            lines.append(_device_line(device, idx))
+
+    lines.append("")
+    lines.append(
+        "Выберите устройство для удаления (❗️❗️❗️ обязательно удалите подписку "
+        "из приложения на старом устройстве иначе в течении часа старое устройство "
+        "повторно добавится в личный кабинет):"
+    )
+
+    btn_rows = [
+        (idx, _device_button_label(device))
+        for idx, device in enumerate(devices)
+    ]
+    return "\n".join(lines), devices, btn_rows
+
+
+async def _show_subscriptions(callback: CallbackQuery) -> None:
+    slots = await _active_slots(callback.from_user.id)
+    if not slots:
+        await callback.message.edit_text(
+            text=_no_subscriptions_text(),
+            reply_markup=keyboard_devices_subscriptions([]),
+        )
+        return
+
+    await callback.message.edit_text(
+        text=_subscriptions_text(),
+        reply_markup=keyboard_devices_subscriptions(
+            [(slot_key, label) for slot_key, label, _uuid in slots]
+        ),
+    )
+
+
+async def _show_devices(callback: CallbackQuery, slot_key: str) -> None:
+    ctx = await _slot_context(callback.from_user.id, slot_key)
+    if not ctx:
+        await callback.answer("Подписка не найдена или истекла", show_alert=True)
+        await _show_subscriptions(callback)
+        return
+
+    label, user_uuid, username = ctx
+    text, devices, btn_rows = await _devices_screen_text(label, user_uuid, username)
+
+    if not devices:
+        markup = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text=BTN_BACK, callback_data="dev_back_subs")]
+            ]
+        )
+        await callback.message.edit_text(text=text, reply_markup=markup)
+        return
+
+    await callback.message.edit_text(
+        text=text,
+        reply_markup=keyboard_devices_list(slot_key, btn_rows),
+    )
+
+
+@router.callback_query(F.data == "manage_devices")
+async def manage_devices_entry(callback: CallbackQuery) -> None:
+    await callback.answer()
+    slots = await _active_slots(callback.from_user.id)
+    if not slots:
+        await callback.message.answer(
+            text=_no_subscriptions_text(),
+            reply_markup=keyboard_devices_subscriptions([]),
+        )
+        return
+
+    await callback.message.answer(
+        text=_subscriptions_text(),
+        reply_markup=keyboard_devices_subscriptions(
+            [(slot_key, label) for slot_key, label, _uuid in slots]
+        ),
+    )
+
+
+@router.callback_query(F.data == "dev_back_main")
+async def devices_back_to_main(callback: CallbackQuery) -> None:
+    await callback.answer()
+    await callback.message.edit_text(
+        text=lexicon["start"],
+        reply_markup=keyboard_start(),
+        disable_web_page_preview=True,
+    )
+
+
+@router.callback_query(F.data == "dev_back_subs")
+async def devices_back_to_subscriptions(callback: CallbackQuery) -> None:
+    await callback.answer()
+    await _show_subscriptions(callback)
+
+
+@router.callback_query(F.data.regexp(_DEV_SUB_RE))
+async def devices_pick_subscription(callback: CallbackQuery) -> None:
+    await callback.answer()
+    slot_key = callback.data.removeprefix("dev_sub_")
+    await _show_devices(callback, slot_key)
+
+
+@router.callback_query(F.data.regexp(_DEV_RM_RE))
+async def devices_delete_device(callback: CallbackQuery) -> None:
+    match = _DEV_RM_RE.match(callback.data or "")
+    if not match:
+        await callback.answer()
+        return
+
+    slot_key, idx_str = match.groups()
+    device_idx = int(idx_str)
+
+    ctx = await _slot_context(callback.from_user.id, slot_key)
+    if not ctx:
+        await callback.answer("Подписка не найдена или истекла", show_alert=True)
+        await _show_subscriptions(callback)
+        return
+
+    label, user_uuid, username = ctx
+    devices, _total = await x3.get_user_hwid_devices(user_uuid)
+
+    if device_idx < 0 or device_idx >= len(devices):
+        await callback.answer("Устройство уже удалено", show_alert=True)
+        await _show_devices(callback, slot_key)
+        return
+
+    hwid = devices[device_idx].get("hwid")
+    if not hwid:
+        await callback.answer("Не удалось определить устройство", show_alert=True)
+        return
+
+    ok = await x3.delete_user_hwid_device(user_uuid, hwid)
+    if not ok:
+        await callback.answer("Не удалось удалить устройство. Попробуйте позже.", show_alert=True)
+        logger.error(
+            "devices_delete_device: user=%s slot=%s hwid=%s",
+            callback.from_user.id,
+            slot_key,
+            hwid,
+        )
+    else:
+        await callback.answer("Устройство удалено")
+
+    text, fresh_devices, btn_rows = await _devices_screen_text(label, user_uuid, username)
+    if not fresh_devices:
+        markup = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text=BTN_BACK, callback_data="dev_back_subs")]
+            ]
+        )
+        await callback.message.edit_text(text=text, reply_markup=markup)
+        return
+
+    await callback.message.edit_text(
+        text=text,
+        reply_markup=keyboard_devices_list(slot_key, btn_rows),
+    )

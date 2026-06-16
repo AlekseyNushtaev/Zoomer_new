@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import uuid
 import asyncio
+from typing import Any, Dict, List, Optional, Tuple
 
 import urllib3
 import aiohttp
@@ -679,6 +680,101 @@ class X3:
         except Exception as e:
             logger.error(f"Ошибка при получении ссылки для {user_id}: {e}")
         return ""
+
+    SUBSCRIPTION_SLOTS: Tuple[Tuple[str, str, str], ...] = (
+        ("main", "", "💫 VPN PRO"),
+        ("white", "_white", "🦾 Включи мобильный интернет"),
+    )
+
+    @staticmethod
+    def _panel_user_from_response(users: Optional[dict]) -> Optional[dict]:
+        if not users or 'response' not in users or not users['response']:
+            return None
+        raw = users['response']
+        return raw[0] if isinstance(raw, list) else raw
+
+    @staticmethod
+    def _panel_user_is_active(user: dict) -> bool:
+        expiry_time_str = user.get('expireAt')
+        if not expiry_time_str:
+            return False
+        expiry_dt = datetime.datetime.fromisoformat(expiry_time_str.replace('Z', '+00:00'))
+        now = datetime.datetime.now(datetime.timezone.utc)
+        expiry_time = int(expiry_dt.timestamp() * 1000)
+        current_time = int(now.timestamp() * 1000)
+        return user.get('status') == 'ACTIVE' and expiry_time > current_time
+
+    async def active_subscription_slots(
+        self, telegram_id: int,
+    ) -> List[Tuple[str, str, str, str]]:
+        """Активные подписки: (ключ слота, подпись, uuid в панели, username)."""
+        out: List[Tuple[str, str, str, str]] = []
+        for slot_key, suffix, label in self.SUBSCRIPTION_SLOTS:
+            username = f"{telegram_id}{suffix}"
+            users = await self.get_user_by_username(username)
+            user = self._panel_user_from_response(users)
+            if not user or not self._panel_user_is_active(user):
+                continue
+            user_uuid = user.get('uuid')
+            if not user_uuid:
+                continue
+            out.append((slot_key, label, user_uuid, username))
+        return out
+
+    async def get_user_hwid_devices(self, user_uuid: str) -> Tuple[List[Dict[str, Any]], int]:
+        """Список HWID-устройств пользователя и их количество."""
+        try:
+            session = await self._get_session()
+            async with session.get(
+                f"{self.target_url}/api/hwid/devices/{user_uuid}",
+                params=self.params,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    logger.error(
+                        f"get_user_hwid_devices {user_uuid}: HTTP {resp.status} — {await resp.text()}"
+                    )
+                    return [], 0
+                data = await resp.json()
+        except Exception as e:
+            logger.error(f"get_user_hwid_devices {user_uuid}: {e}")
+            return [], 0
+
+        response = data.get('response') if isinstance(data, dict) else None
+        if isinstance(response, list):
+            devices = response
+            total = len(devices)
+        elif isinstance(response, dict):
+            devices = response.get('devices') or []
+            total = response.get('total', len(devices))
+        else:
+            devices = []
+            total = 0
+        return devices, int(total)
+
+    async def delete_user_hwid_device(self, user_uuid: str, hwid: str) -> bool:
+        """Удаляет одно HWID-устройство пользователя."""
+        try:
+            session = await self._get_session()
+            async with session.post(
+                f"{self.target_url}/api/hwid/devices/delete",
+                json={"userUuid": user_uuid, "hwid": hwid},
+                params=self.params,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    logger.error(
+                        f"delete_user_hwid_device {user_uuid}: HTTP {resp.status} — {await resp.text()}"
+                    )
+                    return False
+                data = await resp.json()
+                if isinstance(data, dict) and data.get('success') is False:
+                    logger.error(f"delete_user_hwid_device API: {data}")
+                    return False
+                return True
+        except Exception as e:
+            logger.error(f"delete_user_hwid_device {user_uuid}: {e}")
+            return False
 
     async def activ(self, user_id: str):
         result = {'activ': '🔎 - Не подключён', 'time': '-'}

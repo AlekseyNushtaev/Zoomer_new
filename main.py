@@ -26,6 +26,7 @@ from handlers import (
     handlers_export,
     handlers_excel_restore,
     handlers_import,
+    handlers_devices,
 )
 from sheduler.time_mes import send_message_cron
 from logging_config import logger
@@ -56,6 +57,7 @@ async def main() -> None:
     dp.include_router(handlers_broadcast.router)
     dp.include_router(handlers_admin.router)
     dp.include_router(handlers_import.router)
+    dp.include_router(handlers_devices.router)
     dp.include_router(handlers_user.router)
     dp.include_router(handlers_export.router)
     dp.include_router(handlers_excel_restore.router)

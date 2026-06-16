@@ -9,7 +9,8 @@ from config import ADMIN_IDS, CHECKER_ID
 from telegram_ids import is_telegram_chat_id
 from config_bd.models import Users
 from X3 import panel_username_for_site_user
-from keyboard import create_kb, STYLE_SUCCESS, STYLE_PRIMARY, STYLE_DANGER
+from keyboard import create_kb, STYLE_SUCCESS, STYLE_PRIMARY, STYLE_DANGER, keyboard_sub_after_buy
+from lexicon import lexicon
 from logging_config import logger
 import asyncio
 from aiogram import Router, F
@@ -41,11 +42,32 @@ def _msk_dt_str(dt: Optional[datetime]) -> str:
     return aware.astimezone(_MSK).strftime("%d-%m-%Y %H:%M МСК")
 
 
-def _panel_sub_line(activ_result: dict) -> str:
+def _pay_dt_str(dt: Optional[datetime]) -> str:
+    """Формат даты для /pay: YYYY-MM-DD HH:MM:SS (МСК)."""
+    if dt is None:
+        return "Нет"
+    if dt.tzinfo is None:
+        aware = dt.replace(tzinfo=timezone.utc)
+    else:
+        aware = dt.astimezone(timezone.utc)
+    return aware.astimezone(_MSK).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _pay_panel_sub_line(activ_result: dict) -> str:
     t = activ_result.get("time", "-")
     if t in (None, "", "-"):
         return "Нет"
-    return str(t)
+    try:
+        parsed = datetime.strptime(str(t).replace(" МСК", "").strip(), "%d-%m-%Y %H:%M")
+        return parsed.strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return str(t)
+
+
+_SUB_TIER_LABELS = {
+    "main": "💫 подписка на VPN",
+    "white": "🦾 Включи мобильный интернет",
+}
 
 
 def _panel_usernames_from_row(row: tuple) -> tuple[str, str]:
@@ -205,19 +227,15 @@ async def pay_info_command(message: Message):
     pay_rows = await sql.get_user_subscription_payment_report(target_id)
     pay_lines: list[str] = []
     for tc, kind, days_s in pay_rows:
-        if tc.tzinfo is None:
-            tc_aware = tc.replace(tzinfo=timezone.utc)
-        else:
-            tc_aware = tc.astimezone(timezone.utc)
-        ts = tc_aware.astimezone(_MSK).strftime("%d-%m-%Y %H:%M МСК")
+        ts = _pay_dt_str(tc)
         pay_lines.append(f"• {ts} — {kind} — {days_s} дн.")
 
     body = (
         f"<b>/pay {target_id}</b>\n\n"
-        f"Подписка обычная в БД бота — {_msk_dt_str(sub_db)}\n"
-        f"Подписка обычная в панели — {_panel_sub_line(ar_reg)}\n"
-        f"Подписка вайт в БД бота — {_msk_dt_str(white_db)}\n"
-        f"Подписка вайт в панели — {_panel_sub_line(ar_white)}\n\n"
+        f"Подписка обычная в БД бота — {_pay_dt_str(sub_db)}\n"
+        f"Подписка обычная в панели — {_pay_panel_sub_line(ar_reg)}\n"
+        f"Подписка вайт в БД бота — {_pay_dt_str(white_db)}\n"
+        f"Подписка вайт в панели — {_pay_panel_sub_line(ar_white)}\n\n"
         f"<b>Платежи:</b>\n"
     )
     if pay_lines:
@@ -398,34 +416,39 @@ async def set_subscription_date(message: Message):
         else:
             await sql.update_subscription_end_date(user_id, actual_date)
 
-        # Сообщаем результат
+        tier = "white" if is_white else "main"
+        notify_status = ""
+        if is_telegram_chat_id(user_id):
+            try:
+                sub_link = await x3.sublink(username)
+                user_text = lexicon["sub_granted_notify"].format(
+                    tier=_SUB_TIER_LABELS.get(tier, tier),
+                    end_date=_msk_dt_str(actual_date),
+                )
+                await bot.send_message(
+                    user_id,
+                    user_text,
+                    parse_mode="HTML",
+                    disable_web_page_preview=True,
+                    reply_markup=keyboard_sub_after_buy(sub_link) if sub_link else None,
+                )
+                notify_status = "\n📨 Пользователь уведомлён."
+            except Exception as e:
+                logger.error(f"/sub: не удалось уведомить user={user_id}: {e}")
+                notify_status = f"\n⚠️ Не удалось уведомить пользователя: {e}"
+        else:
+            notify_status = "\nℹ️ Уведомление не отправлено (не Telegram ID)."
+
         await message.answer(
             f"✅ Дата подписки успешно установлена!\n\n"
             f"👤 Пользователь: {user_id}\n"
+            f"🔑 Панель: {username}\n"
             f"📅 Целевая дата (UTC): {target_date.strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"📅 Установленная в панели дата (UTC): {actual_date.strftime('%Y-%m-%d %H:%M:%S')}\n"
-            f"📝 Тип: {'white' if is_white else 'обычная'}\n"
+            f"📝 Тариф: {_SUB_TIER_LABELS.get(tier, tier)}\n"
             f"💾 База данных обновлена."
+            f"{notify_status}"
         )
-        if not is_telegram_chat_id(user_id):
-            await message.answer(
-                "ℹ️ Уведомление в Telegram пользователю не отправлялось: "
-                "для этого user_id нет личного чата (например, аккаунт только с сайта)."
-            )
-        else:
-            try:
-                await bot.send_message(
-                    chat_id=user_id,
-                    text=f"✅ Вам обновлена дата подписки!\n\n"
-                    f"📅 Новая дата окончания подписки: {actual_date.strftime('%Y-%m-%d %H:%M:%S')}\n"
-                    f"📝 Тариф: {'🦾 Включи мобильный интернет' if is_white else '💫 подписка на VPN'}\n",
-                    reply_markup=create_kb(1, back_to_main='🔙 Назад')
-                )
-            except Exception as e:
-                logger.error(f"Ошибка при отправке сообщения пользователю {user_id}: {e}")
-                await message.answer(
-                    f"❌ Произошла ошибка при отправке сообщения пользователю {user_id}: {str(e)}"
-                )
 
     except Exception as e:
         logger.error(f"Ошибка в команде /sub: {e}")
