@@ -29,10 +29,16 @@ import asyncio
 
 router = Router()
 
+# ~20 сообщений/с на пользователя (1 API-вызов). В режиме pin — 3 вызова с паузами между шагами.
+_BROADCAST_USER_DELAY = 0.05
+_BROADCAST_PIN_STEP_DELAY = 0.04
+_BROADCAST_PIN_USER_DELAY = 0.05
+
 CB_CAT = "bcat:"
 CB_AUD = "baud:"
 CB_KB = "bktyp:"
 CB_CONF = "bcf:"
+CB_PIN = "bcpin:"
 BCBTN = "bcbtn:"
 BCACT = "bcact:"
 BCST = "bcst:"
@@ -72,7 +78,7 @@ CUSTOM_PRESETS = [
     ("r_120", "🔥 Акция: 120 дней — 539 руб", STYLE_SUCCESS),
     ("r_180", "💪 180 дней — 999 руб (выгода −50%)", STYLE_SUCCESS),
     ("r_5000", "♾️ Навсегда — 3490 руб", STYLE_SUCCESS),
-    ("r_white_30", "🦾 Включи мобильный интернет - 399 руб", STYLE_PRIMARY),
+    # ("r_white_30", "🦾 Включи мобильный интернет - 399 руб", STYLE_PRIMARY),
     ("r_30secret", "🔒 СЕКРЕТНЫЙ ТАРИФ", STYLE_DANGER),
 ]
 
@@ -137,6 +143,17 @@ def _custom_presets_markup() -> InlineKeyboardMarkup:
     )
     b.row(InlineKeyboardButton(text="🔙 Назад", callback_data="broadcast_cancel"))
     return b.as_markup()
+
+
+def _pin_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Да", callback_data=f"{CB_PIN}y"),
+                InlineKeyboardButton(text="Нет", callback_data=f"{CB_PIN}n"),
+            ],
+        ]
+    )
 
 
 def _confirm_markup() -> InlineKeyboardMarkup:
@@ -268,6 +285,7 @@ class BroadcastState(StatesGroup):
     custom_link_text = State()
     custom_link_url = State()
     custom_link_style = State()
+    waiting_for_pin = State()
     confirm_send = State()
 
 
@@ -365,7 +383,7 @@ async def broadcast_pick_keyboard(callback: CallbackQuery, state: FSMContext, bo
         return
 
     await state.update_data(keyboard_mode=mode, custom_kb_spec=[])
-    await _send_preview_and_confirm(callback.message, state, bot)
+    await _ask_pin_message(callback.message, state)
 
 
 @router.callback_query(F.data.startswith(BCBTN), StateFilter(BroadcastState.custom_kb))
@@ -469,7 +487,30 @@ async def broadcast_custom_link_pick_style(callback: CallbackQuery, state: FSMCo
 
 
 @router.callback_query(F.data == f"{BCACT}done", StateFilter(BroadcastState.custom_kb))
-async def broadcast_custom_done(callback: CallbackQuery, state: FSMContext, bot: Bot):
+async def broadcast_custom_done(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await _ask_pin_message(callback.message, state)
+
+
+async def _ask_pin_message(message: Message, state: FSMContext):
+    await message.answer(
+        "Прикрепить сообщение в чате у каждого получателя?",
+        reply_markup=_pin_markup(),
+    )
+    await state.set_state(BroadcastState.waiting_for_pin)
+
+
+@router.callback_query(F.data.startswith(CB_PIN), StateFilter(BroadcastState.waiting_for_pin))
+async def broadcast_pick_pin(callback: CallbackQuery, state: FSMContext, bot: Bot):
+    tail = callback.data[len(CB_PIN) :]
+    if tail == "y":
+        pin_message = True
+    elif tail == "n":
+        pin_message = False
+    else:
+        await callback.answer("Неверный выбор.", show_alert=True)
+        return
+    await state.update_data(pin_message=pin_message)
     await callback.answer()
     await _send_preview_and_confirm(callback.message, state, bot)
 
@@ -511,8 +552,14 @@ async def _send_preview_and_confirm(message: Message, state: FSMContext, bot: Bo
 
     cat_label = CATEGORY_LABELS.get(category, category)
     scope = SCOPE_LABEL[exclude_today]
+    pin_label = (
+        "с прикреплением в чате"
+        if data.get("pin_message")
+        else "без прикрепления"
+    )
     await message.answer(
-        f"Подтвердить отправку {n} пользователям в категории «{cat_label}», {scope}?",
+        f"Подтвердить отправку {n} пользователям в категории «{cat_label}», "
+        f"{scope}, {pin_label}?",
         reply_markup=_confirm_markup(),
     )
     await state.set_state(BroadcastState.confirm_send)
@@ -538,6 +585,7 @@ async def broadcast_confirm_yes(callback: CallbackQuery, state: FSMContext, bot:
     exclude_today = bool(data.get("exclude_today_broadcast"))
     keyboard_mode = data.get("keyboard_mode")
     custom_spec = data.get("custom_kb_spec") or []
+    pin_message = bool(data.get("pin_message"))
 
     if not b_mid or not b_cid or not b_ct or not category:
         await callback.answer("Ошибка данных.", show_alert=True)
@@ -570,14 +618,37 @@ async def broadcast_confirm_yes(callback: CallbackQuery, state: FSMContext, bot:
             continue
         markup = _resolve_reply_markup(keyboard_mode, custom_spec, uid)
         try:
-            await bot.copy_message(
-                chat_id=uid,
-                from_chat_id=b_cid,
-                message_id=b_mid,
-                reply_markup=markup,
-            )
+            if pin_message:
+                try:
+                    await bot.unpin_all_chat_messages(chat_id=uid)
+                except Exception as unpin_err:
+                    logger.warning(f"Broadcast: unpin failed for {uid}: {unpin_err}")
+                await asyncio.sleep(_BROADCAST_PIN_STEP_DELAY)
+                sent = await bot.copy_message(
+                    chat_id=uid,
+                    from_chat_id=b_cid,
+                    message_id=b_mid,
+                    reply_markup=markup,
+                )
+                await asyncio.sleep(_BROADCAST_PIN_STEP_DELAY)
+                try:
+                    await bot.pin_chat_message(
+                        chat_id=uid,
+                        message_id=sent.message_id,
+                        disable_notification=True,
+                    )
+                except Exception as pin_err:
+                    logger.warning(f"Broadcast: pin failed for {uid}: {pin_err}")
+                await asyncio.sleep(_BROADCAST_PIN_USER_DELAY)
+            else:
+                await bot.copy_message(
+                    chat_id=uid,
+                    from_chat_id=b_cid,
+                    message_id=b_mid,
+                    reply_markup=markup,
+                )
+                await asyncio.sleep(_BROADCAST_USER_DELAY)
             await sql.update_broadcast_status(uid, "sent")
-            await asyncio.sleep(0.05)
             count += 1
             if count % 1000 == 0:
                 try:
