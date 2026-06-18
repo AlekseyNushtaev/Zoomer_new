@@ -39,7 +39,7 @@ NOT_SUB_STAGES = (
 NOT_CONNECT_STAGES = (
     PushStage(30, 60, 'push_not_connected_30m', keyboard='connect_only'),
     PushStage(180, 210, 'push_not_connected_3h', with_video=True, keyboard='connect_only'),
-    PushStage(1410, 1440, 'push_not_connected_24h', keyboard='connect_only'),
+    PushStage(1110, 1140, 'push_not_connected_24h', keyboard='connect_only'),
 )
 
 
