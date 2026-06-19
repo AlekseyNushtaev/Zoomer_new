@@ -182,7 +182,7 @@ async def devices_back_to_main(callback: CallbackQuery) -> None:
     await callback.answer()
     await callback.message.edit_text(
         text=lexicon["start"],
-        reply_markup=keyboard_start(),
+        reply_markup=keyboard_start(callback.from_user.id),
         disable_web_page_preview=True,
     )
 

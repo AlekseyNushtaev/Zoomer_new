@@ -27,6 +27,7 @@ from handlers import (
     handlers_excel_restore,
     handlers_import,
     handlers_devices,
+    handlers_patner,
 )
 from sheduler.time_mes import send_message_cron
 from logging_config import logger
@@ -54,6 +55,7 @@ async def main() -> None:
             bypass_user_ids=ADMIN_IDS,
         )
     )
+    dp.include_router(handlers_patner.router)
     dp.include_router(handlers_broadcast.router)
     dp.include_router(handlers_admin.router)
     dp.include_router(handlers_import.router)
@@ -70,17 +72,17 @@ async def main() -> None:
 
     # Запуск шедулера
     scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
-    scheduler.add_job(send_message_cron, trigger='interval', minutes=10, args=[bot], misfire_grace_time=120)
-    scheduler.add_job(check_connect, trigger='interval', minutes=14, misfire_grace_time=60)
+    # scheduler.add_job(send_message_cron, trigger='interval', minutes=10, args=[bot], misfire_grace_time=120)
+    # scheduler.add_job(check_connect, trigger='interval', minutes=14, misfire_grace_time=60)
     # scheduler.add_job(check_platega, trigger='interval', minutes=1, misfire_grace_time=10)
     # scheduler.add_job(check_platega_card, trigger='interval', minutes=1, misfire_grace_time=10)
     # scheduler.add_job(check_platega_crypto, trigger='interval', minutes=1, misfire_grace_time=10)
     # scheduler.add_job(check_wata_sbp, trigger='interval', minutes=1, misfire_grace_time=10)
     # scheduler.add_job(check_wata_card, trigger='interval', minutes=1, misfire_grace_time=10)
-    scheduler.add_job(check_fk, trigger='interval', minutes=1, misfire_grace_time=10)
-    scheduler.add_job(check_cryptobot_payments, trigger='interval', minutes=1, misfire_grace_time=10)
-    scheduler.add_job(send_push_cron, trigger='interval', minutes=30, misfire_grace_time=60)
-    scheduler.add_job(check_online_daily, 'cron', hour=2, minute=55, id='daily_online_stats', misfire_grace_time=60)
+    #scheduler.add_job(check_fk, trigger='interval', minutes=1, misfire_grace_time=10)
+    #scheduler.add_job(check_cryptobot_payments, trigger='interval', minutes=1, misfire_grace_time=10)
+    #scheduler.add_job(send_push_cron, trigger='interval', minutes=30, misfire_grace_time=60)
+    #scheduler.add_job(check_online_daily, 'cron', hour=2, minute=55, id='daily_online_stats', misfire_grace_time=60)
     scheduler.add_job(
         pg_dump_backup_cron,
         trigger='interval',

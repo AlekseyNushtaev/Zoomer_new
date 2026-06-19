@@ -214,11 +214,11 @@ async def process_start_command(message: Message, command: Command):
 
     if not in_panel:
         await message.answer(text=lexicon['start_bonus'],
-                             reply_markup=keyboard_start_bonus(),
+                             reply_markup=keyboard_start_bonus(message.from_user.id),
                              disable_web_page_preview=True)
     else:
         await message.answer(text=lexicon['start'],
-                             reply_markup=keyboard_start(),
+                             reply_markup=keyboard_start(message.from_user.id),
                              disable_web_page_preview=True)
 
 
@@ -396,7 +396,7 @@ async def free_vpn_cb(callback: CallbackQuery):
         in_panel = user_data[4]
     if in_panel:
         await callback.message.answer(text=lexicon['free_vpn_no'],
-                                      reply_markup=keyboard_start())
+                                      reply_markup=keyboard_start(callback.from_user.id))
         return
     # Проверка на наличие данных
     # await x3.test_connect()
@@ -620,7 +620,7 @@ async def handle_back_to_menu(callback: CallbackQuery):
 async def handle_back_to_menu(callback: CallbackQuery):
     """Обработчик для возврата в главное меню из оплаты"""
     await callback.message.answer(text=lexicon['start'],
-                                  reply_markup=keyboard_start(),
+                                  reply_markup=keyboard_start(callback.from_user.id),
                                   disable_web_page_preview=True)
 
 

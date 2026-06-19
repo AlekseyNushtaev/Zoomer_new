@@ -266,7 +266,7 @@ def _resolve_reply_markup(
     if keyboard_mode == "tariff":
         return keyboard_tariff()
     if keyboard_mode == "start":
-        return keyboard_start()
+        return keyboard_start(target_user_id)
     if keyboard_mode == "custom":
         return _build_custom_reply_markup(custom_spec or [], target_user_id)
     return None

@@ -220,6 +220,24 @@ class PasswordResetCodes(Base):
     expires_at = Column(DateTime, nullable=False)
 
 
+class PartnerBotApplications(Base):
+    __tablename__ = 'partner_bot_applications'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    partner_tg_id = Column(BigInteger, nullable=False)
+    partner_username = Column(String(255), nullable=True)
+    partner_first_name = Column(String(255), nullable=True)
+    bot_token_encrypted = Column(Text, nullable=False)
+    bot_token_hash = Column(String(64), nullable=False, unique=True)
+    bot_username = Column(String(255), nullable=False, unique=True)
+    bot_display_name = Column(String(255), nullable=True)
+    status = Column(String(32), nullable=False, default='pending')
+    reject_reason = Column(Text, nullable=True)
+    instance_id = Column(String(512), nullable=True)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    deployed_at = Column(DateTime, nullable=True)
+
+
 # Функция для создания таблиц (запустить один раз)
 async def create_tables():
     async with engine.begin() as conn:

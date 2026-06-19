@@ -85,3 +85,10 @@ def build_database_url() -> str:
 
 
 DATABASE_URL = build_database_url()
+
+ADMIN_PARTNER_IDS: Set[int] = {
+    int(x.strip()) for x in os.environ.get("ADMIN_PARTNER_IDS", "").split(",") if x.strip()
+}
+PARTNER_VPS_IP: str = (os.environ.get("PARTNER_VPS_IP") or "").strip().rstrip("/")
+PARTNER_VPS_API_KEY: Optional[str] = (os.environ.get("PARTNER_VPS_API_KEY") or "").strip() or None
+TOKEN_ENCRYPTION_KEY: Optional[str] = (os.environ.get("TOKEN_ENCRYPTION_KEY") or "").strip() or None
