@@ -2,7 +2,7 @@ import urllib.parse
 from datetime import datetime, timezone
 
 from bot import sql, x3, bot
-from config import CHANEL_ID, PUBLIC_SITE_URL, PARTNER_PROCENT, PARTNER_MIN, PARTNER_SUPPORT_URL, BOT_URL
+from config import CHANEL_ID, PUBLIC_SITE_URL, PARTNER_PROCENT, PARTNER_MIN, SUPPORT_URL, BOT_URL
 from lead_tracker import post_user_registered, post_user_trial, tracker_source_from_ref_and_stamp
 from keyboard import (keyboard_start, keyboard_start_bonus, keyboard_tariff_bonus, keyboard_tariff,
                       keyboard_subscription, keyboard_sub_after_free, ref_keyboard, keyboard_gift_tariff,
@@ -513,7 +513,7 @@ async def partner_withdraw(callback: CallbackQuery):
             balance=balance,
             min_sum=PARTNER_MIN,
         ),
-        reply_markup=keyboard_partner_withdraw(PARTNER_SUPPORT_URL),
+        reply_markup=keyboard_partner_withdraw(SUPPORT_URL),
     )
 
 

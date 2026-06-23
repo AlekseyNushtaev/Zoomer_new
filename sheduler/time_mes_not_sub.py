@@ -151,7 +151,7 @@ async def send_push_cron(debug: bool = False):
 
                 elif not user_data[5]:  # is_connect: VPN ещё не подключён
                     subscription_end_date = user_data[9]
-                    if not subscription_end_date or subscription_end_date <= now:
+                    if not subscription_end_date or subscription_end_date < now:
                         continue
                     offset = minutes_diff % NOT_CONNECT_CYCLE_MINUTES
                     stage = _find_stage(int(offset), NOT_CONNECT_STAGES)
