@@ -1451,6 +1451,15 @@ async def require_partner_bot_auth(
 PartnerBotAuth = Annotated[None, Depends(require_partner_bot_auth)]
 
 
+@app.get("/api/partner/health")
+async def partner_api_health():
+    """Проверка доступности API (без ключа) — для диагностики с VPS партнёров."""
+    return {
+        "status": "ok",
+        "applications_enabled": bool(PARTNER_BOT_API_KEY),
+    }
+
+
 class PartnerBotApplicationIn(BaseModel):
     source_bot_id: int = Field(..., gt=0, description="BOT_ID партнёрского бота, откуда пришла заявка")
     partner_tg_id: int = Field(..., gt=0)
@@ -1464,6 +1473,8 @@ async def partner_bot_create_application(
     body: PartnerBotApplicationIn,
     _: PartnerBotAuth,
 ):
+    import asyncio
+
     from services.partner_apply import submit_partner_application, notify_admins_new_application
 
     app, err = await submit_partner_application(
@@ -1476,7 +1487,9 @@ async def partner_bot_create_application(
     if err:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, err)
 
-    await notify_admins_new_application(body.partner_tg_id, app.id, body.source_bot_id)
+    asyncio.create_task(
+        notify_admins_new_application(body.partner_tg_id, app.id, body.source_bot_id)
+    )
     return {
         "success": True,
         "application_id": app.id,
