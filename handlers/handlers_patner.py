@@ -1,8 +1,6 @@
 import asyncio
-import re
 from datetime import datetime
 
-import aiohttp
 from aiogram import Router, F
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
@@ -15,6 +13,7 @@ from config import ADMIN_IDS, ADMIN_PARTNER_IDS
 from config_bd.partner_apps import PartnerAppSQL
 from keyboard import create_kb, STYLE_PRIMARY, STYLE_SUCCESS, STYLE_DANGER, BTN_BACK
 from logging_config import logger
+from services.partner_apply import submit_partner_application
 from services.partner_vps_client import (
     PartnerVpsError,
     bot_stats,
@@ -23,12 +22,10 @@ from services.partner_vps_client import (
     stop_bot,
     wait_bot_running,
 )
-from utils.token_crypto import decrypt_token, encrypt_token, token_hash
+from utils.token_crypto import decrypt_token
 
 router = Router()
 partner_sql = PartnerAppSQL()
-
-TOKEN_PATTERN = re.compile(r"^\d+:[A-Za-z0-9_-]{30,}$")
 
 
 class PartnerApplyFSM(StatesGroup):
@@ -54,16 +51,6 @@ async def _safe_edit_message(chat_id: int, message_id: int, text: str, **kwargs)
     except TelegramBadRequest as e:
         if "message is not modified" not in str(e).lower():
             raise
-
-
-async def _validate_bot_token(token: str) -> dict | None:
-    url = f"https://api.telegram.org/bot{token.strip()}/getMe"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-            data = await resp.json()
-            if not data.get("ok"):
-                return None
-            return data["result"]
 
 
 def _admin_menu_kb() -> InlineKeyboardMarkup:
@@ -108,11 +95,15 @@ def _app_card_kb(app_id: int, status: str) -> InlineKeyboardMarkup:
 
 
 def _format_app(app) -> str:
+    source_line = ""
+    if getattr(app, "source_bot_id", None):
+        source_line = f"\nИсточник заявки: бот #{app.source_bot_id}"
     return (
         f"<b>Заявка #{app.id}</b> — <code>{app.status}</code>\n"
         f"Партнёр: {app.partner_first_name or '—'} "
         f"(@{app.partner_username or '—'}, <code>{app.partner_tg_id}</code>)\n"
-        f"Бот: {app.bot_display_name} (@{app.bot_username})\n"
+        f"Бот: {app.bot_display_name} (@{app.bot_username})"
+        f"{source_line}\n"
         f"Создана: {app.created_at:%d.%m.%Y %H:%M}"
         + (f"\nПричина отказа: {app.reject_reason}" if app.reject_reason else "")
     )
@@ -143,7 +134,13 @@ async def _run_partner_deploy(
     )
     try:
         token = decrypt_token(app.bot_token_encrypted)
-        deploy_result = await deploy_bot(app_id, token, app.partner_tg_id, app.bot_username)
+        deploy_result = await deploy_bot(
+            app_id,
+            token,
+            app.partner_tg_id,
+            app.bot_username,
+            source_bot_id=getattr(app, "source_bot_id", None),
+        )
         vps_status = await wait_bot_running(app_id, deploy_result)
         logger.info("partner {} VPS confirmed: app_id={} vps_status={}", log_action, app_id, vps_status)
 
@@ -209,19 +206,9 @@ async def _run_partner_deploy(
             )
 
 
-async def _notify_admins_new_application(partner_tg_id: int, app_id: int) -> None:
-    apps = await partner_sql.list_by_partner(partner_tg_id)
-    history = "\n".join(f"• #{a.id} — {a.status} (@{a.bot_username})" for a in apps)
-    text = (
-        f"🆕 <b>Новая заявка #{app_id}</b>\n"
-        f"Партнёр <code>{partner_tg_id}</code>\n\n"
-        f"<b>Все заявки партнёра:</b>\n{history}"
-    )
-    for admin_id in ADMIN_PARTNER_IDS:
-        try:
-            await bot.send_message(admin_id, text, reply_markup=_admin_menu_kb())
-        except Exception as e:
-            logger.error("notify admin {}: {}", admin_id, e)
+async def _notify_admins_new_application(partner_tg_id: int, app_id: int, source_bot_id: int | None = None) -> None:
+    from services.partner_apply import notify_admins_new_application
+    await notify_admins_new_application(partner_tg_id, app_id, source_bot_id)
 
 
 @router.callback_query(F.data == "create_partner_bot")
@@ -231,9 +218,14 @@ async def create_partner_bot_start(callback: CallbackQuery, state: FSMContext):
         return
     await state.set_state(PartnerApplyFSM.waiting_token)
     await callback.message.answer(
-        "🤖 <b>Создать своего VPN-бота</b>\n\n"
-        "Отправьте токен бота от @BotFather.\n"
-        "Формат: <code>123456789:ABCdef...</code>",
+        "🚀 <b>Создай своего бота VPN и зарабатывай!</b>\n\n"
+        "💼 Предлагаем партнёрскую программу получения дохода со своего бота VPN.\n\n"
+        "💰 <b>В своём боте вы зарабатываете:</b>\n"
+        "• <b>50%</b> — от платежей клиентов вашего бота <i>без</i> партнёрской ссылки\n"
+        "• <b>20%</b> — от платежей клиентов вашего бота <i>с</i> партнёрской ссылкой\n"
+        "• <b>10%</b> — от платежей клиентов партнёров, которые создали своего бота через вас\n\n"
+        "🤖 Отправьте токен бота от @BotFather.\n"
+        "📋 Формат: <code>123456789:ABCdef...</code>",
         reply_markup=create_kb(1, cancel_partner_apply="❌ Отмена"),
     )
     await callback.answer()
@@ -252,48 +244,24 @@ async def partner_token_received(message: Message, state: FSMContext):
         await state.clear()
         return
     token = (message.text or "").strip()
-    if not TOKEN_PATTERN.match(token):
-        await message.answer("❌ Неверный формат токена. Отправьте токен от @BotFather.")
-        return
 
-    th = token_hash(token)
-    if await partner_sql.get_by_token_hash(th):
-        await message.answer("❌ Заявка с этим токеном уже существует.")
-        await state.clear()
-        return
-
-    me = await _validate_bot_token(token)
-    if not me:
-        await message.answer("❌ Токен недействителен. Проверьте токен через @BotFather.")
-        return
-
-    bot_username = me.get("username", "")
-    bot_display_name = me.get("first_name", "")
-
-    for existing in await partner_sql.list_by_partner(message.from_user.id):
-        if existing.bot_token_hash == th:
-            await message.answer("❌ Этот токен уже привязан к вашей заявке.")
-            await state.clear()
-            return
-
-    other = await partner_sql.get_by_token_hash(th)
-    if other and other.partner_tg_id != message.from_user.id:
-        await message.answer("❌ Этот токен уже привязан к другому партнёру.")
-        await state.clear()
-        return
-
-    app = await partner_sql.create_application(
+    app, err = await submit_partner_application(
         partner_tg_id=message.from_user.id,
         partner_username=message.from_user.username,
         partner_first_name=message.from_user.first_name,
-        bot_token_encrypted=encrypt_token(token),
-        bot_token_hash=th,
-        bot_username=bot_username,
-        bot_display_name=bot_display_name,
+        token=token,
+        source_bot_id=None,
     )
+    if err:
+        await message.answer(f"❌ {err}")
+        if "уже" in err.lower():
+            await state.clear()
+        return
+
     await state.clear()
     await message.answer("✅ Заявка отправлена на модерацию. Мы уведомим вас после проверки.")
-    await _notify_admins_new_application(message.from_user.id, app.id)
+    from services.partner_apply import notify_admins_new_application
+    await notify_admins_new_application(message.from_user.id, app.id)
 
 
 @router.message(Command("admin_partner"))

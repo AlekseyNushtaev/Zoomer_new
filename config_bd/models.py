@@ -234,6 +234,7 @@ class PartnerBotApplications(Base):
     status = Column(String(32), nullable=False, default='pending')
     reject_reason = Column(Text, nullable=True)
     instance_id = Column(String(512), nullable=True)
+    source_bot_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.now, nullable=False)
     deployed_at = Column(DateTime, nullable=True)
 

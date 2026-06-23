@@ -34,6 +34,7 @@ async def deploy_bot(
     token: str,
     partner_tg_id: int,
     bot_username: str,
+    source_bot_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     if not PARTNER_VPS_IP:
         raise PartnerVpsError("PARTNER_VPS_IP not configured")
@@ -44,6 +45,8 @@ async def deploy_bot(
         "partner_tg_id": partner_tg_id,
         "bot_username": bot_username.lstrip("@"),
     }
+    if source_bot_id:
+        body["source_bot_id"] = source_bot_id
     logger.info(
         "partner VPS deploy request: bot_id={} partner_tg_id={} username=@{}",
         bot_id,

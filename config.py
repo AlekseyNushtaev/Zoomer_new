@@ -92,3 +92,4 @@ ADMIN_PARTNER_IDS: Set[int] = {
 PARTNER_VPS_IP: str = (os.environ.get("PARTNER_VPS_IP") or "").strip().rstrip("/")
 PARTNER_VPS_API_KEY: Optional[str] = (os.environ.get("PARTNER_VPS_API_KEY") or "").strip() or None
 TOKEN_ENCRYPTION_KEY: Optional[str] = (os.environ.get("TOKEN_ENCRYPTION_KEY") or "").strip() or None
+PARTNER_BOT_API_KEY: Optional[str] = (os.environ.get("PARTNER_BOT_API_KEY") or "").strip() or None

@@ -20,6 +20,7 @@ class PartnerAppSQL:
         bot_token_hash: str,
         bot_username: str,
         bot_display_name: str,
+        source_bot_id: Optional[int] = None,
     ) -> PartnerBotApplications:
         async with self.session_factory() as session:
             app = PartnerBotApplications(
@@ -30,6 +31,7 @@ class PartnerAppSQL:
                 bot_token_hash=bot_token_hash,
                 bot_username=bot_username.lstrip("@"),
                 bot_display_name=bot_display_name,
+                source_bot_id=source_bot_id,
                 status="pending",
             )
             session.add(app)

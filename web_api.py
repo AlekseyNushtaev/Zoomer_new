@@ -31,6 +31,7 @@ from config import (
     CRYPTOBOT_API_TOKEN,
     GOOGLE_CLIENT_ID,
     JWT_SECRET,
+    PARTNER_BOT_API_KEY,
     PAYMENT_MAX_PENDING_PER_USER,
     SHOP_ID_FREEKASSA,
     SMTP_FROM,
@@ -1414,3 +1415,71 @@ async def user_change_password(ctx: JwtCtx, body: ChangePasswordIn):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неверный текущий пароль")
     await sql.set_password_hash_by_internal_id(int(row[0]), _hash_password(body.new_password))
     return {"success": True}
+
+
+# ── Partner bot application API (server-to-server) ───────────────────
+
+partner_bot_api_key_header = APIKeyHeader(
+    name="X-Partner-Bot-Api-Key",
+    scheme_name="PartnerBotApiKey",
+    auto_error=False,
+    description="Значение из .env: PARTNER_BOT_API_KEY",
+)
+
+
+async def require_partner_bot_auth(
+    request: Request,
+    x_partner_bot_key: Optional[str] = Security(partner_bot_api_key_header),
+) -> None:
+    if not PARTNER_BOT_API_KEY:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Не задан PARTNER_BOT_API_KEY — приём заявок от партнёрских ботов отключён.",
+        )
+    if x_partner_bot_key == PARTNER_BOT_API_KEY:
+        return
+    bearer = (request.headers.get("Authorization") or "").strip()
+    if bearer.lower().startswith("bearer "):
+        if bearer[7:].strip() == PARTNER_BOT_API_KEY:
+            return
+    raise HTTPException(
+        status.HTTP_401_UNAUTHORIZED,
+        "Неверный или отсутствующий ключ партнёрского бота.",
+    )
+
+
+PartnerBotAuth = Annotated[None, Depends(require_partner_bot_auth)]
+
+
+class PartnerBotApplicationIn(BaseModel):
+    source_bot_id: int = Field(..., gt=0, description="BOT_ID партнёрского бота, откуда пришла заявка")
+    partner_tg_id: int = Field(..., gt=0)
+    partner_username: Optional[str] = None
+    partner_first_name: Optional[str] = None
+    bot_token: str = Field(..., min_length=10)
+
+
+@app.post("/api/partner/applications")
+async def partner_bot_create_application(
+    body: PartnerBotApplicationIn,
+    _: PartnerBotAuth,
+):
+    from services.partner_apply import submit_partner_application, notify_admins_new_application
+
+    app, err = await submit_partner_application(
+        partner_tg_id=body.partner_tg_id,
+        partner_username=body.partner_username,
+        partner_first_name=body.partner_first_name,
+        token=body.bot_token,
+        source_bot_id=body.source_bot_id,
+    )
+    if err:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, err)
+
+    await notify_admins_new_application(body.partner_tg_id, app.id, body.source_bot_id)
+    return {
+        "success": True,
+        "application_id": app.id,
+        "status": app.status,
+        "bot_username": app.bot_username,
+    }
