@@ -103,8 +103,9 @@ async def _send_push(user_id: int, stage: PushStage) -> None:
 
 async def send_push_cron(debug: bool = False):
     """
-    Push по этапам после регистрации: без подписки (in_panel=False) — недельный цикл,
-    затем с подпиской, но без VPN (is_connect=False) — суточный цикл из 3 пушей.
+    Push по этапам после регистрации: без подписки (in_panel=False) — недельный цикл;
+    с активной подпиской (subscription_end_date > now), но без VPN (is_connect=False) —
+    суточный цикл из 3 пушей.
     """
     try:
         all_users = await sql.SELECT_ALL_USERS()
@@ -149,6 +150,9 @@ async def send_push_cron(debug: bool = False):
                             logger.error(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
 
                 elif not user_data[5]:  # is_connect: VPN ещё не подключён
+                    subscription_end_date = user_data[9]
+                    if not subscription_end_date or subscription_end_date <= now:
+                        continue
                     offset = minutes_diff % NOT_CONNECT_CYCLE_MINUTES
                     stage = _find_stage(int(offset), NOT_CONNECT_STAGES)
                     if stage:
