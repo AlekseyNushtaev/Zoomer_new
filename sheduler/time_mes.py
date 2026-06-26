@@ -1,5 +1,6 @@
 import asyncio
 import json
+import random
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Set
 
@@ -244,7 +245,9 @@ async def send_message_cron(bot: Bot):
                         key = f'p{n}'
                         if key not in sent and _in_send_window(now, moment):
                             await bot.send_message(
-                                chat_id=user_id, text=lexicon['push_off'], reply_markup=keyboard
+                                chat_id=user_id,
+                                text=random.choice(lexicon['push_off']),
+                                reply_markup=keyboard,
                             )
                             await asyncio.sleep(0.05)
                             sent.add(key)
