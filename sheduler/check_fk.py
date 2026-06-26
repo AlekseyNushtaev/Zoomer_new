@@ -12,6 +12,8 @@ from payments.process_payload import process_confirmed_payment
 
 # Локально закрываем «зависшие» pending, если FreeKassa всё ещё не подтвердила оплату.
 FK_PENDING_MAX_AGE = timedelta(hours=8)
+# Младше 2 ч: confirmed в БД только после успешной панели; старше — confirmed до панели.
+FK_PANEL_CONFIRM_DEFER = timedelta(hours=4)
 
 
 def _fk_payment_timed_out(payment: PaymentsFkSBP) -> bool:
@@ -19,6 +21,14 @@ def _fk_payment_timed_out(payment: PaymentsFkSBP) -> bool:
     if tc is None:
         return False
     return datetime.now() - tc >= FK_PENDING_MAX_AGE
+
+
+def _fk_defer_panel_confirm(payment: PaymentsFkSBP) -> bool:
+    """True, если платёж младше 2 ч — сначала панель, потом confirmed в БД."""
+    tc = payment.time_created
+    if tc is None:
+        return True
+    return datetime.now() - tc < FK_PANEL_CONFIRM_DEFER
 
 
 def _resolve_fk_status_after_api(
@@ -129,19 +139,17 @@ async def check_fk_sbp():
                         f"(fk_order_id={payment.fk_order_id}, orders={len(orders_list)})"
                     )
 
-                if new_status != payment.status and new_status:
+                if new_status == "confirmed":
+                    if await _handle_fk_api_confirmed(payment, row):
+                        confirmed_count += 1
+                elif new_status == "canceled" and new_status != payment.status:
                     await sql.update_fk_sbp_payment_status(payment_id, new_status)
                     api_status = _coerce_fk_api_status(row.get("status")) if row else None
                     logger.info(
                         f"🔄 FreeKassa {payment_id}: {payment.status} → {new_status} (api={api_status})")
-
-                    if new_status == "confirmed":
-                        await _process_confirmed_fk(payment)
-                        confirmed_count += 1
-                    elif new_status == "canceled":
-                        canceled_count += 1
-                        cancel_text = lexicon['payment_cancel']
-                        await bot.send_message(payment.user_id, cancel_text, reply_markup=keyboard_payment_cancel())
+                    canceled_count += 1
+                    cancel_text = lexicon['payment_cancel']
+                    await bot.send_message(payment.user_id, cancel_text, reply_markup=keyboard_payment_cancel())
 
                 processed_count += 1
 
@@ -155,12 +163,53 @@ async def check_fk_sbp():
         logger.error(f"❌ check_fk_sbp: {e}")
 
 
-async def _process_confirmed_fk(payment):
+async def _handle_fk_api_confirmed(payment: PaymentsFkSBP, row: Optional[dict]) -> bool:
+    """
+    FreeKassa подтвердила оплату. Возвращает True, если платёж в БД стал confirmed.
+    < 2 ч: панель → при успехе confirmed; при сбое панели остаётся pending (повтор на след. тике).
+    ≥ 2 ч: confirmed в БД до панели (платёж не зависает в pending навсегда).
+    """
+    payment_id = payment.transaction_id
+    if not payment_id:
+        return False
+
+    defer = _fk_defer_panel_confirm(payment)
+    api_status = _coerce_fk_api_status(row.get("status")) if row else None
+
+    if not defer and payment.status == "pending":
+        await sql.update_fk_sbp_payment_status(payment_id, "confirmed")
+        logger.info(
+            f"🔄 FreeKassa {payment_id}: pending → confirmed (≥2ч, до панели, api={api_status})"
+        )
+
+    ok = await _process_confirmed_fk(payment)
+
+    if ok:
+        if defer and payment.status == "pending":
+            await sql.update_fk_sbp_payment_status(payment_id, "confirmed")
+            logger.info(
+                f"🔄 FreeKassa {payment_id}: pending → confirmed (после панели, api={api_status})"
+            )
+        return True
+
+    if defer:
+        logger.warning(
+            f"FreeKassa {payment_id}: панель не ответила, статус остаётся pending (api={api_status})"
+        )
+        return False
+
+    logger.error(
+        f"FreeKassa {payment_id}: панель не ответила (платёж уже confirmed в БД, ≥2ч, api={api_status})"
+    )
+    return True
+
+
+async def _process_confirmed_fk(payment) -> bool:
     payload = payment.payload
     if not payload:
         logger.error(f"❌ FreeKassa: нет payload у {payment.transaction_id}")
-        return
-    await process_confirmed_payment(payload)
+        return False
+    return await process_confirmed_payment(payload)
 
 
 check_fk = check_fk_sbp

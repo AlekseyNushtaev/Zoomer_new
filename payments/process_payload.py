@@ -145,8 +145,8 @@ async def _apply_panel_subscription(
     return response, existed
 
 
-async def process_confirmed_payment(payload):
-    """Обработка подтвержденного платежа"""
+async def process_confirmed_payment(payload) -> bool:
+    """Обработка подтвержденного платежа. True — подписка/подарок применены успешно."""
     try:
         payload_parts = dict(item.split(":", 1) for item in payload.split(","))
         raw_uid = payload_parts.get("user_id", "0")
@@ -155,7 +155,7 @@ async def process_confirmed_payment(payload):
         secret_tariff = raw_duration == "30secret"
         if duration is None or duration <= 0:
             logger.error("Платёж: некорректный duration в payload: {}", raw_duration)
-            return
+            return False
         white_flag = payload_parts.get("white", "False") == "True"
         is_gift = payload_parts.get("gift", "False") == "True"
         method = payload_parts.get("method", "")
@@ -181,7 +181,7 @@ async def process_confirmed_payment(payload):
             currency = "⭐️"
             if "@" in str(raw_uid):
                 logger.error("Stars-платёж с email в user_id не поддерживается")
-                return
+                return False
             uid_stars = int(raw_uid)
             await sql.add_payment_stars(uid_stars, amount, payload, is_gift)
         elif method in ("ton", "usdt"):
@@ -195,7 +195,7 @@ async def process_confirmed_payment(payload):
                 row_g = await sql.get_user_by_email(_norm_email(str(raw_uid)))
                 if row_g is None:
                     logger.error("Подарок: email не найден в БД")
-                    return
+                    return False
                 giver_billing_id = int(row_g[1])
             else:
                 giver_billing_id = int(raw_uid)
@@ -237,10 +237,12 @@ async def process_confirmed_payment(payload):
             else:
                 logger.info("Подарок (сайт): уведомление в Telegram пропущено, giver_id={}", giver_billing_id)
 
+            return True
+
         else:
             resolved = await _resolve_buyer_for_payment(raw_uid, white_flag)
             if resolved is None:
-                return
+                return False
             user_id_str, db_uid, notify_tg, use_add_client_site, site_email_norm = resolved
 
             response, existing_user = await _apply_panel_subscription(
@@ -254,7 +256,7 @@ async def process_confirmed_payment(payload):
 
             if not response:
                 logger.error("❌ Не удалось обновить клиента {}", user_id_str)
-                return
+                return False
 
             result_active = await x3.activ(user_id_str)
             subscription_time = result_active.get("time", "-")
@@ -365,5 +367,10 @@ async def process_confirmed_payment(payload):
             else:
                 logger.info("Платёж сайта: Telegram-уведомление не отправлялось (db_uid={})", db_uid)
 
+            return True
+
     except Exception as e:
         logger.error("❌ Ошибка обработки подтвержденного платежа: {}", e)
+        return False
+
+    return False
