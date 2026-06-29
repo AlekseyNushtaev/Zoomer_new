@@ -351,6 +351,13 @@ def keyboard_import_app(os_callback: str):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(
+                text="🔥 INCY",
+                callback_data=f"{os_callback}_incy",
+                style=STYLE_PRIMARY,
+            )
+        ],
+        [
+            InlineKeyboardButton(
                 text="⭐️ Happ",
                 callback_data=f"{os_callback}_happ",
                 style=STYLE_PRIMARY,
