@@ -58,7 +58,7 @@ def _admin_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📋 Заявки на модерации", callback_data="pa_list_pending", style=STYLE_PRIMARY)],
         [InlineKeyboardButton(text="✅ Активные боты", callback_data="pa_list_active", style=STYLE_SUCCESS)],
         [InlineKeyboardButton(text="⏸ Остановленные", callback_data="pa_list_stopped", style=STYLE_PRIMARY)],
-        [InlineKeyboardButton(text="🗑 Удалить всех ботов", callback_data="pa_delete_all", style=STYLE_DANGER)],
+        #[InlineKeyboardButton(text="🗑 Удалить всех ботов", callback_data="pa_delete_all", style=STYLE_DANGER)],
     ])
 
 
@@ -224,7 +224,7 @@ async def create_partner_bot_start(callback: CallbackQuery, state: FSMContext):
         "• <b>50%</b> — от платежей клиентов вашего бота <i>без</i> партнёрской ссылки\n"
         "• <b>20%</b> — от платежей клиентов вашего бота <i>с</i> партнёрской ссылкой\n"
         "• <b>10%</b> — от платежей клиентов партнёров, которые создали своего бота через вас\n\n"
-        "🤖 Отправьте токен бота от @BotFather.\n"
+        "🤖 Создайте бота в @BotFather и отправьте его токен.\n"
         "📋 Формат: <code>123456789:ABCdef...</code>",
         reply_markup=create_kb(1, cancel_partner_apply="❌ Отмена"),
     )
