@@ -340,7 +340,9 @@ class AsyncSQL:
                 nxt -= 1
             return nxt
 
-    async def register_email_user(self, email: str, password_hash: str) -> int:
+    async def register_email_user(
+        self, email: str, password_hash: str, stamp: str = "email"
+    ) -> int:
         em = _norm_email(email)
         uid = await self.next_negative_user_id()
         async with self.session_factory() as session:
@@ -348,13 +350,27 @@ class AsyncSQL:
                 user_id=uid,
                 email=em,
                 password_hash=password_hash,
-                stamp="email",
+                stamp=stamp,
                 create_user=_naive_utc(datetime.now(timezone.utc)),
             )
             session.add(u)
             await session.commit()
             await session.refresh(u)
             return int(u.id)
+
+    async def set_user_stamp_by_internal_id(self, internal_id: int, stamp: str) -> bool:
+        """Обновляет stamp только если текущее значение пустое или 'email'."""
+        async with self.session_factory() as session:
+            result = await session.execute(select(Users).where(Users.id == internal_id))
+            user = result.scalar_one_or_none()
+            if user is None:
+                return False
+            current = (user.stamp or "").strip()
+            if current and current != "email":
+                return False
+            user.stamp = stamp
+            await session.commit()
+            return True
 
     async def set_password_hash_by_internal_id(self, internal_id: int, password_hash: str) -> bool:
         async with self.session_factory() as session:

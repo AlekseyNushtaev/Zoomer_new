@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import hmac
 import os
+import re
 import secrets
 import smtplib
 import string
@@ -508,9 +509,25 @@ async def _bot_deeplink_for_sub_page() -> str:
     return "https://t.me/"
 
 
+_STAMP_RE = re.compile(r"^[a-zA-Z0-9_-]{1,100}$")
+
+
+def _normalize_stamp(raw: Optional[str]) -> str:
+    """Маркетинговая метка источника; без метки или при невалидном значении — 'email'."""
+    if not raw or not str(raw).strip():
+        return "email"
+    s = str(raw).strip().lower()
+    if s == "email":
+        return "email"
+    if _STAMP_RE.fullmatch(s):
+        return s
+    return "email"
+
+
 class RegisterIn(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6, max_length=256)
+    stamp: Optional[str] = None
 
 
 class LoginIn(BaseModel):
@@ -529,6 +546,7 @@ class ResendCodeIn(BaseModel):
 
 class GoogleAuthIn(BaseModel):
     credential: str
+    stamp: Optional[str] = None
 
 
 class ResetPasswordIn(BaseModel):
@@ -1169,16 +1187,21 @@ async def _send_verification_code(email: str) -> str:
 async def auth_register(body: RegisterIn, request: Request):
     client_ip = request.headers.get("x-real-ip", request.client.host)
     _rate_limit_or_raise(client_ip, "register", max_req=5, window=300)
+    stamp = _normalize_stamp(body.stamp)
     existing = await sql.get_user_by_email(str(body.email))
     if existing:
         email_verified = bool(existing[24])
         if email_verified:
             raise HTTPException(status.HTTP_409_CONFLICT, "Email уже зарегистрирован")
         # Not verified yet — resend code
+        if stamp != "email":
+            current_stamp = (existing[14] or "").strip()
+            if not current_stamp or current_stamp == "email":
+                await sql.set_user_stamp_by_internal_id(int(existing[0]), stamp)
         await _send_verification_code(str(body.email))
         return {"success": True, "requires_verification": True, "email": str(body.email).strip().lower()}
     h = _hash_password(body.password)
-    internal_id = await sql.register_email_user(str(body.email), h)
+    internal_id = await sql.register_email_user(str(body.email), h, stamp=stamp)
     em = str(body.email).strip().lower()
     await _send_verification_code(em)
     return {"success": True, "requires_verification": True, "email": em}
@@ -1251,8 +1274,9 @@ async def auth_google(body: GoogleAuthIn, request: Request):
     row = await sql.get_user_by_email(em)
     if row is None:
         # Create new user, already verified (Google verified email)
+        stamp = _normalize_stamp(body.stamp)
         h = _hash_password(secrets.token_hex(32))  # random password
-        internal_id = await sql.register_email_user(em, h)
+        internal_id = await sql.register_email_user(em, h, stamp=stamp)
         await sql.set_email_verified(internal_id, True)
     else:
         internal_id = int(row[0])
