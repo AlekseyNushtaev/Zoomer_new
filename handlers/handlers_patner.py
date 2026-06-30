@@ -9,7 +9,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot import bot
-from config import ADMIN_IDS, ADMIN_PARTNER_IDS
+from config import ADMIN_PARTNER_IDS
 from config_bd.partner_apps import PartnerAppSQL
 from keyboard import create_kb, STYLE_PRIMARY, STYLE_SUCCESS, STYLE_DANGER, BTN_BACK
 from logging_config import logger
@@ -213,9 +213,6 @@ async def _notify_admins_new_application(partner_tg_id: int, app_id: int, source
 
 @router.callback_query(F.data == "create_partner_bot")
 async def create_partner_bot_start(callback: CallbackQuery, state: FSMContext):
-    if callback.from_user.id not in ADMIN_IDS:
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     await state.set_state(PartnerApplyFSM.waiting_token)
     await callback.message.answer(
         "🚀 <b>Создай своего бота VPN и зарабатывай!</b>\n\n"
@@ -240,9 +237,6 @@ async def cancel_partner_apply(callback: CallbackQuery, state: FSMContext):
 
 @router.message(PartnerApplyFSM.waiting_token)
 async def partner_token_received(message: Message, state: FSMContext):
-    if message.from_user.id not in ADMIN_IDS:
-        await state.clear()
-        return
     token = (message.text or "").strip()
 
     app, err = await submit_partner_application(

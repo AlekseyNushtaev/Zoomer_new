@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from config import ADMIN_IDS, BOT_URL
+from config import BOT_URL
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 STYLE_PRIMARY = "primary"
@@ -71,9 +71,8 @@ def keyboard_start_bonus(user_id: Optional[int] = None):
         "buy_vpn": "💰 Купить подписку",
     }
     styles = {"free_vpn": STYLE_SUCCESS, "buy_vpn": STYLE_SUCCESS}
-    if user_id is not None and user_id in ADMIN_IDS:
-        kwargs["create_partner_bot"] = "🤖 Создать своего VPN-бота"
-        styles["create_partner_bot"] = STYLE_PRIMARY
+    kwargs["create_partner_bot"] = "🤖 Создать своего VPN-бота"
+    styles["create_partner_bot"] = STYLE_PRIMARY
     return create_kb(1, styles=styles, **kwargs)
 
 
@@ -103,16 +102,15 @@ def keyboard_start(user_id: Optional[int] = None):
             )
         ]
     )
-    if user_id is not None and user_id in ADMIN_IDS:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text="🤖 Создать своего VPN-бота",
-                    callback_data="create_partner_bot",
-                    style=STYLE_PRIMARY,
-                )
-            ]
-        )
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="🤖 Создать своего VPN-бота",
+                callback_data="create_partner_bot",
+                style=STYLE_PRIMARY,
+            )
+        ]
+    )
     rows.append(
         [
             InlineKeyboardButton(
