@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery, LabeledPrice, PreCheckoutQuery, Message
 from lexicon import lexicon
 from payments.payload_source import BOT
 from payments.process_payload import process_confirmed_payment
+from payments.tariff_gate import is_mobile_tariff_key
 
 
 router: Router = Router()
@@ -24,7 +25,6 @@ def get_stars_amount(currency: str, duration: str) -> float:
             '120': 539,
             '180': 999,
             '5000': 3490,
-            'white_30': 399,
             '30old': 99,
         }
     }
@@ -38,6 +38,10 @@ async def process_payment_stars(callback: CallbackQuery):
     if 'gift_' in callback.data:
         gift_flag = True
     duration = callback.data.replace('stars_r_', '').replace('stars_gift_r_', '')
+
+    if is_mobile_tariff_key(duration):
+        await callback.answer(lexicon['mobile_purchase_disabled'], show_alert=True)
+        return
 
     stars_amount = get_stars_amount('Stars', duration)
     if callback.from_user.id in ADMIN_IDS:

@@ -186,7 +186,6 @@ TARIFF_PUBLIC = [
     ("120", "120 дней (акция)", 5, True),
     ("180", "180 дней", 5, False),
     ("5000", "Навсегда", 5, False),
-    ("white_30", "Mobile 30 дней", 1, False),
 ]
 
 
@@ -248,6 +247,14 @@ def _tariff_parts(tariff_id: str) -> tuple[str, str, bool]:
     if "old" in d:
         d = d.replace("old", "")
     return desc_key, d, white
+
+
+def _reject_mobile_purchase(tariff_id: str) -> None:
+    if _tariff_parts(tariff_id)[2]:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            lexicon["mobile_purchase_disabled"],
+        )
 
 
 def _client_is_https(request: Request) -> bool:
@@ -457,7 +464,7 @@ class CreatePaymentIn(BaseModel):
     is_gift: bool = False
 
 
-SubPageDuration = Literal["7", "30", "90", "180", "5000", "white_30"]
+SubPageDuration = Literal["7", "30", "90", "180", "5000"]
 SUB_PAGE_PAYLOAD_SOURCE = SUBPAGE
 
 sub_page_api_key_header = APIKeyHeader(
@@ -909,6 +916,7 @@ async def payments_create(ctx: JwtCtx, body: CreatePaymentIn):
     tariff_id = body.tariff_id
     if tariff_id not in dct_price:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown tariff")
+    _reject_mobile_purchase(tariff_id)
 
     desc_key, duration_str, white = _tariff_parts(tariff_id)
     price = dct_price[tariff_id]
@@ -960,6 +968,7 @@ async def sub_page_pay_fk_sbp(body: SubPagePayIn, request: Request, _: SubPageAu
     _rate_limit_or_raise(_client_ip_for_rate_limit(request), "sub_page_fk_sbp", max_req=20, window=300)
     if not API_FREEKASSA or SHOP_ID_FREEKASSA is None:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "FreeKassa не настроена")
+    _reject_mobile_purchase(body.duration)
 
     desc_key, duration_str, white = _tariff_parts(body.duration)
     price = dct_price[body.duration]
@@ -997,6 +1006,7 @@ async def sub_page_pay_fk_card(body: SubPagePayIn, request: Request, _: SubPageA
     _rate_limit_or_raise(_client_ip_for_rate_limit(request), "sub_page_fk_card", max_req=20, window=300)
     if not API_FREEKASSA or SHOP_ID_FREEKASSA is None:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "FreeKassa не настроена")
+    _reject_mobile_purchase(body.duration)
 
     desc_key, duration_str, white = _tariff_parts(body.duration)
     price = dct_price[body.duration]
@@ -1032,6 +1042,7 @@ async def sub_page_pay_fk_card(body: SubPagePayIn, request: Request, _: SubPageA
 @app.post("/api/v1/sub_page/pay/stars")
 async def sub_page_pay_stars(body: SubPagePayIn, request: Request, _: SubPageAuth):
     _rate_limit_or_raise(_client_ip_for_rate_limit(request), "sub_page_stars", max_req=20, window=300)
+    _reject_mobile_purchase(body.duration)
 
     desc_key, duration_str, white = _tariff_parts(body.duration)
     stars_amount = int(get_stars_amount("Stars", body.duration))
@@ -1075,6 +1086,7 @@ async def sub_page_pay_cryptobot(body: SubPagePayIn, request: Request, _: SubPag
     _rate_limit_or_raise(_client_ip_for_rate_limit(request), "sub_page_cryptobot", max_req=20, window=300)
     if not CRYPTOBOT_API_TOKEN:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "CryptoBot не настроен")
+    _reject_mobile_purchase(body.duration)
 
     desc_key, duration_str, white = _tariff_parts(body.duration)
     price = dct_price[body.duration]

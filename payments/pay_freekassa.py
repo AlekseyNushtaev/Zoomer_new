@@ -19,6 +19,7 @@ from keyboard import keyboard_payment_sbp, create_kb
 from lexicon import dct_price, dct_desc, lexicon
 from logging_config import logger
 from payments.payment_limits import payment_creation_allowed
+from payments.tariff_gate import is_mobile_tariff_key
 from payments.payload_source import BOT, SITE
 
 router = Router()
@@ -161,6 +162,8 @@ async def pay(
     white: bool,
     ui_kind: UiKind,
 ) -> Dict[str, Any]:
+    if white:
+        return {"status": "error", "url": "", "id": ""}
     if not await payment_creation_allowed(int(user_id)):
         return {"status": "rate_limited", "url": "", "id": ""}
     if not API_FREEKASSA or SHOP_ID_FREEKASSA is None:
@@ -216,6 +219,8 @@ async def pay_for_gift(
     white: bool,
     ui_kind: UiKind,
 ) -> Dict[str, Any]:
+    if white:
+        return {"status": "error", "url": "", "id": ""}
     if not await payment_creation_allowed(int(user_id)):
         return {"status": "rate_limited", "url": "", "id": ""}
     if not API_FREEKASSA or SHOP_ID_FREEKASSA is None:
@@ -276,6 +281,8 @@ async def pay_site(
     payload_source: str = SITE,
 ) -> Dict[str, Any]:
     """Оплата с сайта (web API): payload с user_id/email, method fk_sbp/fk_card, source в payload_source."""
+    if white:
+        return {"status": "error", "url": "", "id": ""}
     if not await payment_creation_allowed(int(billing_user_id), telegram_username):
         return {"status": "rate_limited", "url": "", "id": ""}
     if not API_FREEKASSA or SHOP_ID_FREEKASSA is None:
@@ -340,8 +347,11 @@ def _duration_from_callback(data: str, prefix: str, gift_prefix: str) -> tuple[s
 
 
 async def _handle_wata_style_callback(callback: CallbackQuery, ui_kind: UiKind) -> None:
-    await callback.answer()
     data = callback.data or ""
+    if is_mobile_tariff_key(data):
+        await callback.answer(lexicon["mobile_purchase_disabled"], show_alert=True)
+        return
+    await callback.answer()
     prefix = "wata_sbp_r_" if ui_kind == "sbp" else "wata_card_r_"
     gift_prefix = "wata_sbp_gift_r_" if ui_kind == "sbp" else "wata_card_gift_r_"
     duration, gift_flag = _duration_from_callback(data, prefix, gift_prefix)

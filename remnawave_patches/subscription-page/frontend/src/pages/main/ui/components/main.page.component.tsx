@@ -56,7 +56,7 @@ function subPagePayFromBuild(): { apiBase: string; apiKey: string } {
     }
 }
 
-type DurationId = '7' | '30' | '90' | '180' | '5000' | 'white_30'
+type DurationId = '7' | '30' | '90' | '180' | '5000'
 type PayMethodId = 'fk_sbp' | 'fk_card' | 'stars' | 'cryptobot'
 
 const PAY_METHODS: ReadonlyArray<{ id: PayMethodId; label: string }> = [
@@ -153,6 +153,10 @@ function SubscriptionPayBlock({ isMobile }: { isMobile: boolean }) {
         [pickedDuration, payCfg.apiBase, payCfg.apiKey, userId]
     )
 
+    if (isWhiteProfile) {
+        return null
+    }
+
     if (!payCfg.apiKey) {
         return (
             <Card p="md" radius="lg" withBorder>
@@ -189,11 +193,7 @@ function SubscriptionPayBlock({ isMobile }: { isMobile: boolean }) {
         </Button>
     )
 
-    const tariffStack = isWhiteProfile ? (
-        <Stack gap="sm">
-            {tariffBtn('Мобильный тариф — 30 дней — 399 ₽', 'white_30')}
-        </Stack>
-    ) : (
+    const tariffStack = (
         <Stack gap="sm">
             {tariffBtn('Пробный тариф — 7 дней — 99 ₽', '7')}
             {tariffBtn('30 дней — 249 ₽', '30')}

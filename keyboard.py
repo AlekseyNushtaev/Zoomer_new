@@ -130,7 +130,6 @@ _STYLES_TARIFF = {
     "r_180": STYLE_SUCCESS,
     "r_5000": STYLE_SUCCESS,
     "r_120": STYLE_SUCCESS,
-    "r_white_30": STYLE_PRIMARY,
     "r_30old": STYLE_PRIMARY,
     "free_vpn": STYLE_SUCCESS,
 }
@@ -145,7 +144,6 @@ def keyboard_tariff_bonus():
         r_90='👌 90 дней — 539 руб (выгода −40%)',
         r_180='💪 180 дней — 999 руб (выгода −50%)',
         r_5000='♾️ Навсегда — 3490 руб',
-        # r_white_30='🦾 Включи мобильный интернет - 399 руб',
         free_vpn='🔥ПОПРОБОВАТЬ 1 день БЕСПЛАТНО🔥',
         back_to_main='🔙 Назад',
     )
@@ -160,7 +158,6 @@ def keyboard_tariff():
         r_90='👌 90 дней — 539 руб (выгода −40%)',
         r_180='💪 180 дней — 999 руб (выгода −50%)',
         r_5000='♾️ Навсегда — 3490 руб',
-        # r_white_30='🦾 Включи мобильный интернет - 399 руб',
         back_to_main='🔙 Назад',
     )
 
@@ -175,7 +172,6 @@ def keyboard_tariff_trial():
         r_120='🔥 Акция: 120 дней — 539 руб',
         r_180='💪 180 дней — 999 руб (выгода −50%)',
         r_5000='♾️ Навсегда — 3490 руб',
-        # r_white_30='🦾 Включи мобильный интернет - 399 руб',
         back_to_main='🔙 Назад',
     )
 
@@ -187,12 +183,10 @@ def keyboard_tariff_old():
             "r_30old": STYLE_PRIMARY,
             "r_90": STYLE_SUCCESS,
             "r_180": STYLE_SUCCESS,
-            "r_white_30": STYLE_PRIMARY,
         },
         r_30old='🤝 30 дней — 99 руб',
         r_90='👌 90 дней — 539 руб (выгода −40%)',
         r_180='💪 180 дней — 999 руб (выгода −50%)',
-        # r_white_30='🦾 Включи мобильный интернет - 399 руб',
         back_to_main='🔙 Назад',
     )
 
@@ -203,7 +197,6 @@ _STYLES_GIFT = {
     "gift_r_90": STYLE_SUCCESS,
     "gift_r_180": STYLE_SUCCESS,
     "gift_r_5000": STYLE_SUCCESS,
-    "gift_r_white_30": STYLE_PRIMARY,
 }
 
 
@@ -216,7 +209,6 @@ def keyboard_gift_tariff():
         gift_r_90='👌 90 дней — 539 руб (выгода −40%)',
         gift_r_180='💪 180 дней — 999 руб (выгода −50%)',
         gift_r_5000='♾️ Навсегда — 3490 руб',
-        # gift_r_white_30='🦾 Включи мобильный интернет - 399 руб',
         back_to_main='🔙 Назад',
     )
 

@@ -10,6 +10,7 @@ from lexicon import lexicon, dct_price, dct_desc
 from logging_config import logger
 from payments.payment_limits import payment_creation_allowed
 from payments.payload_source import BOT
+from payments.tariff_gate import is_mobile_tariff_key
 
 router: Router = Router()
 
@@ -101,6 +102,9 @@ async def create_cryptobot_payment(
     Создание платежа через Cryptobot с суммой в рублях.
     Пользователь сам выбирает криптовалюту внутри Cryptobot.
     """
+    if white:
+        return {"status": "error", "url": "", "invoice_id": ""}
+
     if not await payment_creation_allowed(int(user_id), telegram_username):
         return {"status": "rate_limited", "url": "", "invoice_id": ""}
 
@@ -150,6 +154,10 @@ async def process_payment_crypto(callback: CallbackQuery):
         duration_key = data.replace('crypto_gift_r_', '')
     else:
         duration_key = data.replace('crypto_r_', '')
+
+    if is_mobile_tariff_key(duration_key):
+        await callback.answer(lexicon['mobile_purchase_disabled'], show_alert=True)
+        return
 
     rub_amount = dct_price[duration_key]
     desc_key = duration_key

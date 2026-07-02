@@ -374,16 +374,18 @@ async def secret_tariff_payment(callback: CallbackQuery):
     )
 
 
-@router.callback_query(F.data.in_({'r_7', 'r_30', 'r_90', 'r_180', 'r_5000', 'r_white_30'}))
+@router.callback_query(F.data.in_({'r_7', 'r_30', 'r_90', 'r_180', 'r_5000'}))
 async def process_payment_method(callback: CallbackQuery):
     await callback.answer()
     text = lexicon['payment_link']
-    if 'white' in callback.data:
-        await sql.add_white_counter_if_not_exists(callback.from_user.id)
-        text = lexicon['payment_link_white']
     text += '\n\nВыберите способ оплаты:'
     tariff = callback.data
     await callback.message.answer(text, reply_markup=keyboard_payment_method(tariff))
+
+
+@router.callback_query(F.data.in_({'r_white_30', 'gift_r_white_30'}))
+async def mobile_tariff_purchase_disabled(callback: CallbackQuery):
+    await callback.answer(lexicon['mobile_purchase_disabled'], show_alert=True)
 
 
 @router.callback_query(F.data == 'free_vpn')
@@ -529,11 +531,11 @@ async def gift_subscription_start(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith('gift_'))
 async def process_gift_payment_method(callback: CallbackQuery):
+    if 'white' in callback.data:
+        await callback.answer(lexicon['mobile_purchase_disabled'], show_alert=True)
+        return
     await callback.answer()
     text = lexicon['payment_link']
-    if 'white' in callback.data:
-        await sql.add_white_counter_if_not_exists(callback.from_user.id)
-        text = lexicon['payment_link_white']
     tariff = callback.data
     text += '\n\nВыберите способ оплаты <b>подарочной подписки</b>:'
     await callback.message.answer(text, reply_markup=keyboard_payment_method(tariff))
