@@ -231,6 +231,11 @@ async def process_confirmed_payment(payload) -> bool:
                         text=lexicon["payment_gift_faq"],
                         reply_markup=create_kb(1, back_to_main="🔙 Назад"),
                     )
+                    await bot.send_message(
+                        chat_id=giver_billing_id,
+                        text=lexicon["payment_gift_web"].format(gift_id),
+                        disable_web_page_preview=True,
+                    )
                     logger.info("✅ Сообщения о подарке отправлены пользователю {}", giver_billing_id)
                 except Exception as e:
                     logger.error("❌ Ошибка отправки сообщения о подарке: {}", e)

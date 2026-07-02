@@ -268,6 +268,99 @@ class X3:
             logger.error(traceback.format_exc())
             return False
 
+    async def add_client_gift(self, day, panel_username: str, is_white: bool, db_user_id: int):
+        """
+        Клиент веб-подарка: username в панели — gift_N или gift_N_white.
+        shortUuid и пароли — от panel_username + db_user_id.
+        """
+        try:
+            full_username = f"{panel_username}_white" if is_white else panel_username
+            gift_key = (full_username or "").strip().lower()
+            client_id = self.generate_site_short_uuid(gift_key, is_white, db_user_id)
+            current_time = datetime.datetime.utcnow()
+            expire_time = current_time + datetime.timedelta(days=day)
+            vless_uuid = str(uuid.uuid1())
+
+            if is_white:
+                squad = ['627fc165-7598-4517-8baa-72e1a4e4be37']
+                traffic_limit_strategy = "MONTH"
+                traffic_limit_bytes = 80530636800
+                hwid_device_limit = 1
+            else:
+                squad_1 = ['2a2236d1-517b-4015-b961-eae22d2ef7fe']
+                squad_2 = ['889e0d7a-cfa6-4bf9-b2ed-3cb7a1b44cbd']
+                squad = random.choice([squad_1, squad_2])
+                traffic_limit_strategy = "NO_RESET"
+                traffic_limit_bytes = 0
+                hwid_device_limit = 5
+
+            data = {
+                "username": full_username,
+                "status": "ACTIVE",
+                "shortUuid": client_id,
+                "trojanPassword": self._site_password_from_email(gift_key, "trojan"),
+                "vlessUuid": vless_uuid,
+                "ssPassword": self._site_password_from_email(gift_key, "ss"),
+                "trafficLimitStrategy": traffic_limit_strategy,
+                "trafficLimitBytes": traffic_limit_bytes,
+                "expireAt": expire_time.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z',
+                "createdAt": current_time.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z',
+                "hwidDeviceLimit": hwid_device_limit,
+                "telegramId": int(db_user_id),
+                "description": "Gift web user",
+                "activeInternalSquads": squad
+            }
+
+            logger.info(f"Добавление gift-клиента {full_username}, срок до: {expire_time}")
+
+            session = await self._get_session()
+            async with session.post(
+                    f"{self.target_url}/api/users",
+                    json=data,
+                    params=self.params,
+                    timeout=aiohttp.ClientTimeout(total=15)
+            ) as response:
+                logger.info(f"Код ответа add_client_gift: {response.status}")
+
+                if response.status in [200, 201]:
+                    sql = AsyncSQL()
+                    try:
+                        response_data = await response.json()
+                    except (aiohttp.ClientConnectionError, aiohttp.ContentTypeError, ValueError) as e:
+                        logger.warning(
+                            f"Не удалось прочитать JSON при add_client_gift {db_user_id}: {e}. Считаем успехом."
+                        )
+                        subscription_end_date = expire_time.replace(tzinfo=datetime.timezone.utc)
+                        if is_white:
+                            await sql.update_white_subscription_end_date(db_user_id, subscription_end_date)
+                            await sql.update_white_subscription(db_user_id, client_id)
+                        else:
+                            await sql.update_subscription_end_date(db_user_id, subscription_end_date)
+                            await sql.update_subscribtion(db_user_id, client_id)
+                        return True
+                    else:
+                        if response_data.get("success", True):
+                            subscription_end_date = expire_time.replace(tzinfo=datetime.timezone.utc)
+                            if is_white:
+                                await sql.update_white_subscription_end_date(db_user_id, subscription_end_date)
+                                await sql.update_white_subscription(db_user_id, client_id)
+                            else:
+                                await sql.update_subscription_end_date(db_user_id, subscription_end_date)
+                                await sql.update_subscribtion(db_user_id, client_id)
+                            logger.info(f"✅ Gift-клиент {full_username} добавлен")
+                            return True
+                        logger.warning(f"❌ API add_client_gift: {response_data}")
+                        return False
+                error_text = await response.text() if response.content else "No body"
+                logger.error(f"❌ add_client_gift HTTP {response.status} - {error_text}")
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ add_client_gift {full_username}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+
     async def delete_panel_user_by_username(self, username: str) -> bool:
         """Удаляет пользователя в панели по username; если нет — без ошибки."""
         try:

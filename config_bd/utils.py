@@ -1578,6 +1578,36 @@ class AsyncSQL:
                 await session.rollback()
                 logger.error(f"Error updating broadcast status for user {user_id}: {e}")
 
+    async def get_gift(self, gift_id: str) -> Optional[Gifts]:
+        """Возвращает запись подарка или None."""
+        async with self.session_factory() as session:
+            result = await session.execute(select(Gifts).where(Gifts.gift_id == gift_id))
+            return result.scalar_one_or_none()
+
+    async def next_gift_number(self) -> int:
+        """Следующий порядковый номер для panel username gift_N."""
+        async with self.session_factory() as session:
+            stmt = select(func.count()).select_from(Users).where(Users.stamp == "gift")
+            result = await session.execute(stmt)
+            return int(result.scalar_one() or 0) + 1
+
+    async def create_gift_web_user(self, gift_id: str, gift_num: int) -> int:
+        """Создаёт пользователя для веб-активации подарка. Возвращает user_id (отрицательный)."""
+        panel_username = f"gift_{gift_num}"
+        uid = await self.next_negative_user_id()
+        async with self.session_factory() as session:
+            u = Users(
+                user_id=uid,
+                stamp="gift",
+                field_str_1=gift_id,
+                field_str_2=panel_username,
+                in_panel=False,
+                create_user=_naive_utc(datetime.now(timezone.utc)),
+            )
+            session.add(u)
+            await session.commit()
+        return uid
+
     async def activate_gift(self, gift_id: str, recipient_id: int) -> Tuple[bool, Optional[int], Optional[bool]]:
         """
         Активирует подарок по gift_id для указанного получателя.

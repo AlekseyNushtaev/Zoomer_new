@@ -1168,6 +1168,74 @@ async def gift_activate(ctx: JwtCtx, gift_id: str):
     }
 
 
+def _gift_duration_label(days: int) -> str:
+    if days >= 5000:
+        return "Навсегда"
+    if days == 1:
+        return "1 день"
+    if 2 <= days % 100 <= 4 and not (12 <= days % 100 <= 14):
+        return f"{days} дня"
+    return f"{days} дней"
+
+
+@app.post("/api/gifts/{gift_id}/activate-web")
+async def gift_activate_web(gift_id: str):
+    """
+    Публичная активация подарка без Telegram.
+    Создаёт пользователя gift_N в панели и возвращает данные подписки (один раз).
+    """
+    gift = await sql.get_gift(gift_id)
+    if gift is None:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"status": "not_found", "message": "Подарок не найден"},
+        )
+    if gift.flag:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"status": "already_activated", "message": "Подарок уже активирован"},
+        )
+
+    gift_num = await sql.next_gift_number()
+    panel_username = f"gift_{gift_num}"
+    white_flag = bool(gift.white_flag)
+    if white_flag:
+        panel_username += "_white"
+
+    db_user_id = await sql.create_gift_web_user(gift_id, gift_num)
+    result = await sql.activate_gift(gift_id, db_user_id)
+    if not result[0]:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"status": "already_activated", "message": "Подарок уже активирован"},
+        )
+
+    duration = result[1]
+    white_flag = bool(result[2])
+    base_panel_username = f"gift_{gift_num}"
+
+    ok = await x3.add_client_gift(duration, base_panel_username, white_flag, db_user_id)
+    if not ok:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail=lexicon["gift_error"])
+
+    result_active = await x3.activ(panel_username)
+    subscription_time = result_active.get("time", "-")
+    await sql.update_in_panel(db_user_id)
+
+    subscription_url = await x3.sublink(panel_username)
+    devices = 1 if white_flag else 5
+
+    return {
+        "status": "success",
+        "subscription_url": subscription_url,
+        "duration_days": duration,
+        "duration_label": _gift_duration_label(duration),
+        "devices": devices,
+        "expires": subscription_time,
+        "cabinet_url": subscription_url,
+    }
+
+
 def _send_smtp_verification_email(to_email: str, code: str) -> None:
     if not SMTP_HOST or not SMTP_FROM:
         raise RuntimeError("SMTP not configured")
