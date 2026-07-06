@@ -148,7 +148,16 @@ async def _apply_panel_subscription(
 async def process_confirmed_payment(payload) -> bool:
     """Обработка подтвержденного платежа. True — подписка/подарок применены успешно."""
     try:
-        payload_parts = dict(item.split(":", 1) for item in payload.split(","))
+        payload_parts: dict[str, str] = {}
+        for item in payload.split(","):
+            item = item.strip()
+            if not item:
+                continue
+            if ":" in item:
+                k, v = item.split(":", 1)
+                payload_parts[k] = v
+            else:
+                payload_parts[item] = "1"
         raw_uid = payload_parts.get("user_id", "0")
         raw_duration = str(payload_parts.get("duration", "0") or "0").strip()
         duration = _payload_duration_to_panel_days(raw_duration)

@@ -161,6 +161,7 @@ async def pay(
     duration: str,
     white: bool,
     ui_kind: UiKind,
+    payload_suffix: str = "",
 ) -> Dict[str, Any]:
     if white:
         return {"status": "error", "url": "", "id": ""}
@@ -174,6 +175,7 @@ async def pay(
     amount_rub = _fk_amount_rub(val, ui_kind)
     payload = (
         f"user_id:{user_id},duration:{duration},white:{white},gift:False,method:{pm},amount:{amount_rub},source:{BOT}"
+        f"{payload_suffix}"
     )
     fk = FreekassaPayment(API_FREEKASSA, SHOP_ID_FREEKASSA)
     nonce = await sql.alloc_fk_api_nonce()

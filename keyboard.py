@@ -5,6 +5,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import BOT_URL
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from lexicon import dct_price_discount_33
 
 STYLE_PRIMARY = "primary"
 STYLE_SUCCESS = "success"
@@ -651,6 +652,88 @@ def keyboard_devices_confirm(slot_key: str, device_idx: int) -> InlineKeyboardMa
             ],
         ]
     )
+
+
+def keyboard_discount_push_reveal() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="🎁 Узнать награду",
+                callback_data="dpush_reveal",
+                style=STYLE_PRIMARY,
+            )
+        ],
+    ])
+
+
+def keyboard_discount_push_buy() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="⚡ Купить со скидкой",
+                callback_data="dpush_buy",
+                style=STYLE_PRIMARY,
+            )
+        ],
+    ])
+
+
+def keyboard_discount_push_tariffs() -> InlineKeyboardMarkup:
+    p = dct_price_discount_33
+    return create_kb(
+        1,
+        styles={
+            "dpush_tariff_7": STYLE_PRIMARY,
+            "dpush_tariff_30": STYLE_PRIMARY,
+            "dpush_tariff_90": STYLE_SUCCESS,
+            "dpush_tariff_180": STYLE_SUCCESS,
+            "dpush_tariff_5000": STYLE_SUCCESS,
+        },
+        dpush_tariff_7=f'🤌 Неделя — {p["7"]} руб',
+        dpush_tariff_30=f'🤝 30 дней — {p["30"]} руб',
+        dpush_tariff_90=f'👌 90 дней — {p["90"]} руб (выгода −40%)',
+        dpush_tariff_180=f'💪 180 дней — {p["180"]} руб (выгода −50%)',
+        dpush_tariff_5000=f'♾️ Навсегда — {p["5000"]} руб',
+    )
+
+
+def keyboard_discount_push_payment(duration: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="⚡СБП",
+                callback_data=f"dpush_wata_sbp_{duration}",
+                style=STYLE_SUCCESS,
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="💳 Карта РФ",
+                callback_data=f"dpush_wata_card_{duration}",
+                style=STYLE_PRIMARY,
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="⭐️ Telegram Stars",
+                callback_data=f"dpush_stars_{duration}",
+                style=STYLE_PRIMARY,
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="💎 Crypto bot",
+                callback_data=f"dpush_crypto_{duration}",
+                style=STYLE_PRIMARY,
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="🔙 Назад",
+                callback_data="dpush_back_tariffs",
+            )
+        ],
+    ])
 
 
 def keyboard_partner_withdraw(support_url: str):
