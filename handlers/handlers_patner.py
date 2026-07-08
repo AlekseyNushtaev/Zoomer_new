@@ -381,9 +381,6 @@ async def _run_partner_deploy(
 
 @router.callback_query(F.data == "create_partner_bot")
 async def create_partner_bot_start(callback: CallbackQuery, state: FSMContext):
-    if not _is_partner_admin(callback.from_user.id):
-        await callback.answer("Раздел находится в разработке", show_alert=True)
-        return
     await state.clear()
     await _show_partner_create_menu(callback.message, callback.from_user)
     await callback.answer()
@@ -391,9 +388,6 @@ async def create_partner_bot_start(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "partner_manual_token")
 async def partner_manual_token(callback: CallbackQuery, state: FSMContext):
-    if not _is_partner_admin(callback.from_user.id):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     await state.set_state(PartnerApplyFSM.waiting_token)
     await _safe_edit_text(
         callback.message,
@@ -405,9 +399,6 @@ async def partner_manual_token(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "partner_back_create_menu")
 async def partner_back_create_menu(callback: CallbackQuery, state: FSMContext):
-    if not _is_partner_admin(callback.from_user.id):
-        await callback.answer("Нет доступа", show_alert=True)
-        return
     await state.clear()
     draft = await ensure_partner_draft_application(
         partner_tg_id=callback.from_user.id,
@@ -502,10 +493,6 @@ async def partner_managed_bot_created(event, event_from_user: User):
 
 @router.message(PartnerApplyFSM.waiting_token)
 async def partner_token_received(message: Message, state: FSMContext):
-    if not _is_partner_admin(message.from_user.id):
-        await state.clear()
-        return
-
     token = (message.text or "").strip()
 
     app, err = await submit_partner_application(
