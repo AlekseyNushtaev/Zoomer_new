@@ -15,6 +15,7 @@ from config_bd.partner_apps import PartnerAppSQL
 from keyboard import STYLE_PRIMARY, STYLE_SUCCESS, STYLE_DANGER, BTN_BACK, keyboard_start
 from lexicon import lexicon
 from logging_config import logger
+from services.managed_bot_setup import strip_managed_bot_profile
 from services.partner_apply import (
     ensure_partner_draft_application,
     submit_managed_partner_application,
@@ -457,6 +458,11 @@ async def partner_managed_bot_created(event, event_from_user: User):
         except Exception:
             pass
         return
+
+    try:
+        await strip_managed_bot_profile(token)
+    except Exception as e:
+        logger.warning("partner managed_bot profile strip failed: bot_id={} err={}", managed_bot_user.id, e)
 
     app, err = await submit_managed_partner_application(
         partner_tg_id=creator.id,
