@@ -27,6 +27,24 @@ async def validate_bot_token(token: str) -> Optional[dict]:
             return data["result"]
 
 
+async def ensure_partner_draft_application(
+    *,
+    partner_tg_id: int,
+    partner_username: Optional[str],
+    partner_first_name: Optional[str],
+    source_bot_id: Optional[int] = None,
+):
+    draft = await partner_sql.get_active_draft(partner_tg_id)
+    if draft:
+        return draft
+    return await partner_sql.create_draft_application(
+        partner_tg_id=partner_tg_id,
+        partner_username=partner_username,
+        partner_first_name=partner_first_name,
+        source_bot_id=source_bot_id,
+    )
+
+
 async def submit_partner_application(
     *,
     partner_tg_id: int,
@@ -73,6 +91,55 @@ async def submit_partner_application(
         source_bot_id=source_bot_id,
     )
     return app, None
+
+
+async def submit_managed_partner_application(
+    *,
+    partner_tg_id: int,
+    partner_username: Optional[str],
+    partner_first_name: Optional[str],
+    token: str,
+    source_bot_id: Optional[int] = None,
+) -> Tuple[Optional[object], Optional[str]]:
+    token = (token or "").strip()
+    if not TOKEN_PATTERN.match(token):
+        return None, "Неверный формат токена."
+
+    th = token_hash(token)
+    existing = await partner_sql.get_by_token_hash(th)
+    if existing and existing.status != "draft":
+        return None, "Заявка с этим токеном уже существует."
+
+    me = await validate_bot_token(token)
+    if not me:
+        return None, "Токен недействителен."
+
+    bot_username = me.get("username", "")
+    bot_display_name = me.get("first_name", "")
+
+    draft = await partner_sql.get_active_draft(partner_tg_id)
+    if draft:
+        other = await partner_sql.get_by_token_hash(th)
+        if other and other.id != draft.id and other.partner_tg_id != partner_tg_id:
+            return None, "Этот токен уже привязан к другому партнёру."
+        app = await partner_sql.complete_draft_application(
+            draft.id,
+            bot_token_encrypted=encrypt_token(token),
+            bot_token_hash=th,
+            bot_username=bot_username,
+            bot_display_name=bot_display_name,
+        )
+        if not app:
+            return None, "Не удалось сохранить заявку."
+        return app, None
+
+    return await submit_partner_application(
+        partner_tg_id=partner_tg_id,
+        partner_username=partner_username,
+        partner_first_name=partner_first_name,
+        token=token,
+        source_bot_id=source_bot_id,
+    )
 
 
 async def notify_admins_new_application(

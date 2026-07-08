@@ -1,9 +1,11 @@
+import uuid
 from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy import delete, select, update
 
 from config_bd.models import AsyncSessionLocal, PartnerBotApplications
+from utils.token_crypto import encrypt_token, token_hash
 
 
 class PartnerAppSQL:
@@ -76,6 +78,70 @@ class PartnerAppSQL:
             result = await session.execute(delete(PartnerBotApplications))
             await session.commit()
             return result.rowcount or 0
+
+    async def get_active_draft(self, partner_tg_id: int) -> Optional[PartnerBotApplications]:
+        async with self.session_factory() as session:
+            stmt = (
+                select(PartnerBotApplications)
+                .where(
+                    PartnerBotApplications.partner_tg_id == partner_tg_id,
+                    PartnerBotApplications.status == "draft",
+                )
+                .order_by(PartnerBotApplications.created_at.desc())
+                .limit(1)
+            )
+            return (await session.execute(stmt)).scalar_one_or_none()
+
+    async def create_draft_application(
+        self,
+        *,
+        partner_tg_id: int,
+        partner_username: Optional[str],
+        partner_first_name: Optional[str],
+        source_bot_id: Optional[int] = None,
+    ) -> PartnerBotApplications:
+        draft_uid = uuid.uuid4().hex
+        placeholder = f"draft:{partner_tg_id}:{draft_uid}"
+        async with self.session_factory() as session:
+            app = PartnerBotApplications(
+                partner_tg_id=partner_tg_id,
+                partner_username=partner_username,
+                partner_first_name=partner_first_name,
+                bot_token_encrypted=encrypt_token(placeholder),
+                bot_token_hash=token_hash(placeholder),
+                bot_username=f"draft_{draft_uid}_bot",
+                bot_display_name="VPN_project",
+                source_bot_id=source_bot_id,
+                status="draft",
+            )
+            session.add(app)
+            await session.flush()
+            app.bot_username = f"white_lable_n{app.id}_bot"
+            await session.commit()
+            await session.refresh(app)
+            return app
+
+    async def complete_draft_application(
+        self,
+        app_id: int,
+        *,
+        bot_token_encrypted: str,
+        bot_token_hash: str,
+        bot_username: str,
+        bot_display_name: str,
+    ) -> Optional[PartnerBotApplications]:
+        async with self.session_factory() as session:
+            app = await session.get(PartnerBotApplications, app_id)
+            if not app or app.status != "draft":
+                return None
+            app.bot_token_encrypted = bot_token_encrypted
+            app.bot_token_hash = bot_token_hash
+            app.bot_username = bot_username.lstrip("@")
+            app.bot_display_name = bot_display_name
+            app.status = "pending"
+            await session.commit()
+            await session.refresh(app)
+            return app
 
     async def update_status(
         self,
