@@ -18,9 +18,10 @@ from logging_config import logger
 from services.managed_bot_setup import strip_managed_bot_profile
 from services.partner_apply import (
     ensure_partner_draft_application,
+    notify_admins_new_application,
+    notify_partner_user,
     submit_managed_partner_application,
     submit_partner_application,
-    notify_admins_new_application,
 )
 from services.partner_vps_client import (
     PartnerVpsError,
@@ -343,11 +344,15 @@ async def _run_partner_deploy(
             )
             success_text = f"✅ Бот #{app_id} развёрнут.\n{_format_app(updated)}"
             success_markup = _admin_menu_kb()
-        try:
-            await bot.send_message(app.partner_tg_id, partner_text)
+        notified = await notify_partner_user(
+            app.partner_tg_id,
+            partner_text,
+            source_bot_id=getattr(app, "source_bot_id", None),
+        )
+        if notified:
             logger.info("partner {} notify partner: app_id={} tg_id={}", log_action, app_id, app.partner_tg_id)
-        except Exception as e:
-            logger.error("partner {} notify partner failed: app_id={} err={}", log_action, app_id, e)
+        else:
+            logger.error("partner {} notify partner failed: app_id={}", log_action, app_id)
         try:
             await bot.send_message(admin_id, admin_text)
             logger.info("partner {} notify admin: app_id={} admin_id={}", log_action, app_id, admin_id)
@@ -618,10 +623,11 @@ async def pa_reject_reason(message: Message, state: FSMContext):
         text = f"❌ Заявка на бота @{app.bot_username} отклонена."
         if reason:
             text += f"\nПричина: {reason}"
-        try:
-            await bot.send_message(app.partner_tg_id, text)
-        except Exception as e:
-            logger.error("reject notify: {}", e)
+        await notify_partner_user(
+            app.partner_tg_id,
+            text,
+            source_bot_id=getattr(app, "source_bot_id", None),
+        )
     await state.clear()
     await message.answer("Заявка отклонена.", reply_markup=_admin_menu_kb())
 
@@ -639,7 +645,11 @@ async def pa_stop(callback: CallbackQuery):
     try:
         await stop_bot(app_id)
         await partner_sql.update_status(app_id, "stopped")
-        await bot.send_message(app.partner_tg_id, f"⏸ Бот @{app.bot_username} остановлен администратором.")
+        await notify_partner_user(
+            app.partner_tg_id,
+            f"⏸ Бот @{app.bot_username} остановлен администратором.",
+            source_bot_id=getattr(app, "source_bot_id", None),
+        )
         await callback.answer("Остановлен")
     except PartnerVpsError as e:
         await callback.answer(str(e), show_alert=True)

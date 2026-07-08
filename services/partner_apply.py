@@ -6,11 +6,14 @@ from typing import Optional, Tuple
 
 import aiohttp
 
+from aiogram import Bot
+from aiogram.client.default import DefaultBotProperties
+
 from bot import bot
 from config import ADMIN_PARTNER_IDS
 from config_bd.partner_apps import PartnerAppSQL
 from logging_config import logger
-from utils.token_crypto import encrypt_token, token_hash
+from utils.token_crypto import decrypt_token, encrypt_token, token_hash
 
 TOKEN_PATTERN = re.compile(r"^\d+:[A-Za-z0-9_-]{30,}$")
 
@@ -140,6 +143,49 @@ async def submit_managed_partner_application(
         token=token,
         source_bot_id=source_bot_id,
     )
+
+
+async def notify_partner_user(
+    partner_tg_id: int,
+    text: str,
+    source_bot_id: Optional[int] = None,
+) -> bool:
+    """Уведомление партнёру через бот-источник заявки или мастер-бот (fallback)."""
+    if source_bot_id:
+        source_app = await partner_sql.get_by_id(source_bot_id)
+        if source_app and source_app.bot_token_encrypted:
+            try:
+                token = decrypt_token(source_app.bot_token_encrypted)
+                if not token.startswith("draft:"):
+                    source_bot = Bot(
+                        token=token,
+                        default=DefaultBotProperties(parse_mode="HTML"),
+                    )
+                    try:
+                        await source_bot.send_message(partner_tg_id, text)
+                        logger.info(
+                            "notify partner via source bot: tg_id={} source_bot_id={}",
+                            partner_tg_id,
+                            source_bot_id,
+                        )
+                        return True
+                    finally:
+                        await source_bot.session.close()
+            except Exception as e:
+                logger.error(
+                    "notify partner via source bot failed: tg_id={} source_bot_id={} err={}",
+                    partner_tg_id,
+                    source_bot_id,
+                    e,
+                )
+
+    try:
+        await bot.send_message(partner_tg_id, text)
+        logger.info("notify partner via master bot: tg_id={}", partner_tg_id)
+        return True
+    except Exception as e:
+        logger.error("notify partner via master bot failed: tg_id={} err={}", partner_tg_id, e)
+        return False
 
 
 async def notify_admins_new_application(
