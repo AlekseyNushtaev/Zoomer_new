@@ -188,6 +188,41 @@ async def user_info(message: Message):
         await message.answer(f'Ошибка при формировании сообщения: {str(e)}')
 
 
+@router.message(Command(commands=['gift']))
+async def gift_info_command(message: Message):
+    """Информация о подарке по gift_id."""
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    args = (message.text or "").split()
+    if len(args) < 2:
+        await message.answer("❌ Использование: /gift <gift_id>")
+        return
+
+    gift_id = args[1].strip()
+    gift = await sql.get_gift(gift_id)
+    if gift is None:
+        await message.answer("Такого подарка нет.")
+        return
+
+    if gift.recepient_id is None:
+        await message.answer("Подарок ещё не активирован.")
+        return
+
+    if gift.recepient_id > 0:
+        await message.answer(f"Подарок активировал юзер с tg_id = {gift.recepient_id}.")
+        return
+
+    user = await sql.get_user_object_by_user_id(gift.recepient_id)
+    panel_username = user.field_str_2 if user else None
+    if panel_username:
+        await message.answer(f"Подарок активировал юзер с username в панели {panel_username}")
+    else:
+        await message.answer(
+            f"Подарок активирован {gift.recepient_id}"
+        )
+
+
 @router.message(Command(commands=['pay']))
 async def pay_info_command(message: Message):
     """Сводка подписок (БД / панель) и успешные платежи пользователя."""
