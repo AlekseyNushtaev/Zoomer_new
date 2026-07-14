@@ -772,6 +772,15 @@ class AsyncSQL:
             result = await session.execute(stmt)
             return result.scalar() or 0
 
+    async def select_ref_paid_count(self, user_id: int) -> int:
+        async with self.session_factory() as session:
+            stmt = select(func.count(Users.user_id)).where(
+                Users.ref == str(user_id),
+                Users.reserve_field == True,
+            )
+            result = await session.execute(stmt)
+            return result.scalar() or 0
+
     async def select_partner_count(self, partner_id: int) -> int:
         async with self.session_factory() as session:
             stmt = select(func.count(Users.user_id)).where(Users.partner == str(partner_id))
