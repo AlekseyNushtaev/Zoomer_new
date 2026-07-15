@@ -1606,3 +1606,27 @@ async def partner_bot_create_application(
         "status": app.status,
         "bot_username": app.bot_username,
     }
+
+
+@app.get("/api/partner/applications/settings")
+async def partner_export_application_settings(
+    _: PartnerBotAuth,
+    ids: Optional[str] = None,
+):
+    """
+    Экспорт identity-полей заявок для синка в partner.db на VPS.
+    Опционально: ?ids=1,2,3 — только эти bot_id (id заявок).
+    """
+    from config_bd.partner_apps import PartnerAppSQL
+
+    bot_ids: Optional[list[int]] = None
+    if ids and ids.strip():
+        try:
+            bot_ids = [int(x.strip()) for x in ids.split(",") if x.strip()]
+        except ValueError as e:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "ids must be comma-separated integers") from e
+        if not bot_ids:
+            bot_ids = None
+
+    items = await PartnerAppSQL().list_settings_export(bot_ids)
+    return {"success": True, "count": len(items), "items": items}

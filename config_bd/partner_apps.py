@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from sqlalchemy import delete, select, update
 
@@ -72,6 +72,30 @@ class PartnerAppSQL:
         async with self.session_factory() as session:
             stmt = select(PartnerBotApplications).order_by(PartnerBotApplications.id.asc())
             return list((await session.execute(stmt)).scalars().all())
+
+    async def list_settings_export(
+        self,
+        bot_ids: Optional[Sequence[int]] = None,
+    ) -> List[Dict[str, Any]]:
+        """Identity-поля для синка в partner_bot_settings (id заявки == bot_id на VPS)."""
+        async with self.session_factory() as session:
+            stmt = select(PartnerBotApplications).order_by(PartnerBotApplications.id.asc())
+            if bot_ids:
+                stmt = stmt.where(PartnerBotApplications.id.in_(list(bot_ids)))
+            rows = list((await session.execute(stmt)).scalars().all())
+        result: List[Dict[str, Any]] = []
+        for app in rows:
+            result.append(
+                {
+                    "bot_id": app.id,
+                    "partner_username": app.partner_username,
+                    "bot_username": (app.bot_username or "").lstrip("@") or None,
+                    "bot_display_name": app.bot_display_name,
+                    "source_bot_id": app.source_bot_id,
+                    "status": app.status,
+                }
+            )
+        return result
 
     async def delete_all(self) -> int:
         async with self.session_factory() as session:

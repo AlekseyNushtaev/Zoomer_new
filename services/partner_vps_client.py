@@ -136,6 +136,34 @@ async def bot_stats(bot_id: int) -> Dict[str, Any]:
     return await _get(f"/bots/{bot_id}/stats")
 
 
+async def sync_bot_settings(
+    items: list,
+    *,
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    """Пушит identity-поля в partner_api → partner.db (только существующие bot_id)."""
+    if not PARTNER_VPS_IP:
+        raise PartnerVpsError("PARTNER_VPS_IP not configured")
+    url = f"{PARTNER_VPS_IP}/bots/settings/sync"
+    body = {"items": items, "dry_run": dry_run}
+    logger.info(
+        "partner VPS settings sync: items={} dry_run={}",
+        len(items),
+        dry_run,
+    )
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            url,
+            json=body,
+            headers=_headers(),
+            timeout=aiohttp.ClientTimeout(total=120),
+        ) as resp:
+            data = await resp.json()
+            if resp.status >= 400:
+                raise PartnerVpsError(str(data.get("detail", data)))
+            return data
+
+
 async def _post(path: str) -> Dict[str, Any]:
     if not PARTNER_VPS_IP:
         raise PartnerVpsError("PARTNER_VPS_IP not configured")
