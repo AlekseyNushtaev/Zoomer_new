@@ -35,6 +35,8 @@ async def deploy_bot(
     partner_tg_id: int,
     bot_username: str,
     source_bot_id: Optional[int] = None,
+    partner_username: Optional[str] = None,
+    bot_display_name: Optional[str] = None,
 ) -> Dict[str, Any]:
     if not PARTNER_VPS_IP:
         raise PartnerVpsError("PARTNER_VPS_IP not configured")
@@ -47,11 +49,17 @@ async def deploy_bot(
     }
     if source_bot_id:
         body["source_bot_id"] = source_bot_id
+    if partner_username:
+        body["partner_username"] = partner_username.lstrip("@")
+    if bot_display_name:
+        body["bot_display_name"] = bot_display_name
     logger.info(
-        "partner VPS deploy request: bot_id={} partner_tg_id={} username=@{}",
+        "partner VPS deploy request: bot_id={} partner_tg_id={} username=@{} partner=@{} display={}",
         bot_id,
         partner_tg_id,
         bot_username.lstrip("@"),
+        (partner_username or "").lstrip("@") or "-",
+        bot_display_name or "-",
     )
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=body, headers=_headers(), timeout=aiohttp.ClientTimeout(total=120)) as resp:

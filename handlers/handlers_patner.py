@@ -47,7 +47,6 @@ PARTNER_CREATE_MENU_TEXT = (
     "💼 Предлагаем партнёрскую программу получения дохода со своего бота VPN.\n\n"
     "💰 <b>В своём боте вы зарабатываете:</b>\n"
     "• <b>50%</b> — от платежей клиентов вашего бота без партнёрской ссылки\n"
-    "• <b>20%</b> — от платежей клиентов вашего бота с партнёрской ссылкой\n"
     "• <b>10%</b> — от платежей клиентов партнёров, которые создали своего бота через вас\n\n"
     "🤖 <b>Выберите способ создания бота</b>:\n\n"
     "1. Автоматическое создание — быстрый запуск в пару кликов.\n"
@@ -314,6 +313,8 @@ async def _run_partner_deploy(
             app.partner_tg_id,
             app.bot_username,
             source_bot_id=getattr(app, "source_bot_id", None),
+            partner_username=getattr(app, "partner_username", None),
+            bot_display_name=getattr(app, "bot_display_name", None),
         )
         vps_status = await wait_bot_running(app_id, deploy_result)
         logger.info("partner {} VPS confirmed: app_id={} vps_status={}", log_action, app_id, vps_status)
