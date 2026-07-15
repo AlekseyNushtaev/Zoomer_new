@@ -2,7 +2,8 @@ import asyncio
 import urllib.parse
 from datetime import datetime
 
-from aiogram import Router, F
+from aiogram import Bot, Router, F
+from aiogram.client.default import DefaultBotProperties
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -40,6 +41,7 @@ partner_sql = PartnerAppSQL()
 class PartnerApplyFSM(StatesGroup):
     waiting_token = State()
     waiting_reject_reason = State()
+    waiting_stop_message = State()
 
 
 PARTNER_CREATE_MENU_TEXT = (
@@ -265,6 +267,44 @@ def _app_card_kb(app_id: int, status: str) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(text="▶️ Запустить", callback_data=f"pa_start_{app_id}", style=STYLE_SUCCESS)])
     rows.append([InlineKeyboardButton(text="🔙 К меню", callback_data="pa_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _stop_message_kb(app_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Не писать", callback_data=f"pa_stop_skip_{app_id}", style=STYLE_PRIMARY)],
+    ])
+
+
+async def _send_from_stopping_bot(app, text: str) -> bool:
+    """Сообщение владельцу от останавливаемого партнёрского бота (до stop на VPS)."""
+    try:
+        token = decrypt_token(app.bot_token_encrypted)
+        if not token or token.startswith("draft:"):
+            return False
+        child = Bot(token=token, default=DefaultBotProperties(parse_mode="HTML"))
+        try:
+            await child.send_message(app.partner_tg_id, text)
+            return True
+        finally:
+            await child.session.close()
+    except Exception as e:
+        logger.error(
+            "stop notify via stopping bot failed: app_id={} tg_id={} err={}",
+            app.id,
+            app.partner_tg_id,
+            e,
+        )
+        return False
+
+
+async def _execute_partner_stop(app) -> None:
+    await stop_bot(app.id)
+    await partner_sql.update_status(app.id, "stopped")
+    await notify_partner_user(
+        app.partner_tg_id,
+        f"⏸ Бот @{app.bot_username} остановлен администратором.",
+        source_bot_id=getattr(app, "source_bot_id", None),
+    )
 
 
 def _format_app(app) -> str:
@@ -633,8 +673,30 @@ async def pa_reject_reason(message: Message, state: FSMContext):
     await message.answer("Заявка отклонена.", reply_markup=_admin_menu_kb())
 
 
-@router.callback_query(F.data.startswith("pa_stop_"))
-async def pa_stop(callback: CallbackQuery):
+@router.callback_query(F.data.startswith("pa_stop_skip_"))
+async def pa_stop_skip(callback: CallbackQuery, state: FSMContext):
+    if not _is_partner_admin(callback.from_user.id):
+        await callback.answer("Нет доступа", show_alert=True)
+        return
+    app_id = int(callback.data.replace("pa_stop_skip_", ""))
+    app = await partner_sql.get_by_id(app_id)
+    if not app:
+        await callback.answer("Не найдено", show_alert=True)
+        return
+    await state.clear()
+    try:
+        await _execute_partner_stop(app)
+        await callback.message.answer(
+            f"⏸ Бот #{app_id} @{app.bot_username} остановлен.",
+            reply_markup=_admin_menu_kb(),
+        )
+        await callback.answer()
+    except PartnerVpsError as e:
+        await callback.answer(str(e), show_alert=True)
+
+
+@router.callback_query(F.data.regexp(r"^pa_stop_\d+$"))
+async def pa_stop(callback: CallbackQuery, state: FSMContext):
     if not _is_partner_admin(callback.from_user.id):
         await callback.answer("Нет доступа", show_alert=True)
         return
@@ -643,17 +705,56 @@ async def pa_stop(callback: CallbackQuery):
     if not app:
         await callback.answer("Не найдено", show_alert=True)
         return
-    try:
-        await stop_bot(app_id)
-        await partner_sql.update_status(app_id, "stopped")
-        await notify_partner_user(
-            app.partner_tg_id,
-            f"⏸ Бот @{app.bot_username} остановлен администратором.",
-            source_bot_id=getattr(app, "source_bot_id", None),
+    await state.update_data(stop_app_id=app_id)
+    await state.set_state(PartnerApplyFSM.waiting_stop_message)
+    await callback.message.answer(
+        f"Напишите сообщение для владельца бота @{app.bot_username} "
+        f"(заявка #{app_id}):",
+        reply_markup=_stop_message_kb(app_id),
+    )
+    await callback.answer()
+
+
+@router.message(PartnerApplyFSM.waiting_stop_message)
+async def pa_stop_with_message(message: Message, state: FSMContext):
+    if not _is_partner_admin(message.from_user.id):
+        return
+    data = await state.get_data()
+    app_id = data.get("stop_app_id")
+    custom_text = (message.text or message.caption or "").strip()
+    if not app_id:
+        await state.clear()
+        await message.answer("Не найден бот для остановки.", reply_markup=_admin_menu_kb())
+        return
+    if not custom_text:
+        await message.answer("Отправьте текстовое сообщение или нажмите «Не писать».")
+        return
+
+    app = await partner_sql.get_by_id(app_id)
+    if not app:
+        await state.clear()
+        await message.answer("Не найдено.", reply_markup=_admin_menu_kb())
+        return
+
+    await state.clear()
+    sent = await _send_from_stopping_bot(app, custom_text)
+    if not sent:
+        await message.answer(
+            "⚠️ Не удалось отправить сообщение владельцу от останавливаемого бота. "
+            "Остановка отменена.",
+            reply_markup=_admin_menu_kb(),
         )
-        await callback.answer("Остановлен")
+        return
+
+    try:
+        await _execute_partner_stop(app)
+        await message.answer(
+            f"⏸ Бот #{app_id} @{app.bot_username} остановлен.\n"
+            f"Сообщение владельцу отправлено.",
+            reply_markup=_admin_menu_kb(),
+        )
     except PartnerVpsError as e:
-        await callback.answer(str(e), show_alert=True)
+        await message.answer(f"⚠️ Сообщение отправлено, но остановка не удалась: {e}")
 
 
 @router.callback_query(F.data == "pa_delete_all")
