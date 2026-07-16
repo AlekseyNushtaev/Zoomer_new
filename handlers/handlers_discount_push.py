@@ -37,6 +37,8 @@ router = Router()
 _BROADCAST_USER_DELAY = 0.05
 _VALID_DURATIONS = frozenset(dct_price_discount_33.keys())
 _DISCOUNT_PAYLOAD_SUFFIX = ",discount"
+# индекс field_bool_3 в кортеже get_user (_user_tuple)
+_USER_TUPLE_FIELD_BOOL_3 = 26
 
 
 def _initial_caption(tickets: int, winning_ticket: int) -> str:
@@ -147,11 +149,20 @@ async def discount_push_reveal(callback: CallbackQuery):
 
 @router.callback_query(F.data == "dpush_buy")
 async def discount_push_buy(callback: CallbackQuery):
+    uid = callback.from_user.id
+    user_data = await sql.get_user(uid)
+    if user_data is None:
+        await sql.add_user(uid, False)
+        user_data = await sql.get_user(uid)
+    if user_data is not None and user_data[_USER_TUPLE_FIELD_BOOL_3]:
+        await callback.answer("Вы уже воспользовались скидкой!", show_alert=True)
+        return
+
     await callback.answer()
     try:
         await _edit_push_photo(callback, _BUY_CAPTION, keyboard_discount_push_tariffs())
     except Exception:
-        logger.exception("dpush_buy edit failed for user_id={}", callback.from_user.id)
+        logger.exception("dpush_buy edit failed for user_id={}", uid)
 
 
 @router.callback_query(F.data == "dpush_back_tariffs")

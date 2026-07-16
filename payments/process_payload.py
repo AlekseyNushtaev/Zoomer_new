@@ -162,6 +162,7 @@ async def process_confirmed_payment(payload) -> bool:
         raw_duration = str(payload_parts.get("duration", "0") or "0").strip()
         duration = _payload_duration_to_panel_days(raw_duration)
         secret_tariff = raw_duration == "30secret"
+        is_discount = "discount" in payload_parts
         if duration is None or duration <= 0:
             logger.error("Платёж: некорректный duration в payload: {}", raw_duration)
             return False
@@ -347,7 +348,7 @@ async def process_confirmed_payment(payload) -> bool:
             else:
                 await sql.add_user(db_uid, True)
             await sql.update_reserve_field(db_uid)
-            if secret_tariff and not is_gift:
+            if (secret_tariff or is_discount) and not is_gift:
                 await sql.update_field_bool_3(db_uid, True)
 
             tracker_pay_uid = (
