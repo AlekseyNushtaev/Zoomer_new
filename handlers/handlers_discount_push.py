@@ -69,6 +69,30 @@ def _tariff_payment_caption(duration: str) -> str:
     )
 
 
+async def _try_delete_push_message(chat_id: int, message_id: int) -> None:
+    try:
+        await bot.delete_message(chat_id, message_id)
+    except TelegramBadRequest:
+        pass
+
+
+async def _replace_push_photo(
+    chat_id: int,
+    message_id: int,
+    photo_id: str,
+    caption: str,
+    reply_markup: InlineKeyboardMarkup,
+) -> None:
+    await _try_delete_push_message(chat_id, message_id)
+    await bot.send_photo(
+        chat_id,
+        photo=photo_id,
+        caption=caption,
+        parse_mode="HTML",
+        reply_markup=reply_markup,
+    )
+
+
 async def _edit_push_photo(
     callback: CallbackQuery,
     caption: str,
@@ -76,14 +100,15 @@ async def _edit_push_photo(
 ) -> None:
     message = callback.message
     chat_id = message.chat.id
+    message_id = message.message_id
 
     if isinstance(message, InaccessibleMessage):
-        await bot.send_photo(
+        await _replace_push_photo(
             chat_id,
-            photo=DISCOUNT_PUSH_PHOTO_ID,
-            caption=caption,
-            parse_mode="HTML",
-            reply_markup=reply_markup,
+            message_id,
+            DISCOUNT_PUSH_PHOTO_ID,
+            caption,
+            reply_markup,
         )
         return
 
@@ -95,13 +120,7 @@ async def _edit_push_photo(
         )
     except TelegramBadRequest as e:
         logger.warning("dpush edit_media failed for chat_id={}, sending new photo: {}", chat_id, e)
-        await bot.send_photo(
-            chat_id,
-            photo=photo_id,
-            caption=caption,
-            parse_mode="HTML",
-            reply_markup=reply_markup,
-        )
+        await _replace_push_photo(chat_id, message_id, photo_id, caption, reply_markup)
 
 
 def _duration_from_callback(data: str, prefix: str) -> str | None:
