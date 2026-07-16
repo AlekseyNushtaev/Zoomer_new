@@ -3,8 +3,10 @@ import random
 
 from aiogram import Router, F
 from aiogram.filters import Command
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (
     CallbackQuery,
+    InaccessibleMessage,
     InputMediaPhoto,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -72,11 +74,34 @@ async def _edit_push_photo(
     caption: str,
     reply_markup: InlineKeyboardMarkup,
 ) -> None:
-    photo_id = callback.message.photo[-1].file_id if callback.message.photo else DISCOUNT_PUSH_PHOTO_ID
-    await callback.message.edit_media(
-        media=InputMediaPhoto(media=photo_id, caption=caption, parse_mode="HTML"),
-        reply_markup=reply_markup,
-    )
+    message = callback.message
+    chat_id = message.chat.id
+
+    if isinstance(message, InaccessibleMessage):
+        await bot.send_photo(
+            chat_id,
+            photo=DISCOUNT_PUSH_PHOTO_ID,
+            caption=caption,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
+        return
+
+    photo_id = message.photo[-1].file_id if message.photo else DISCOUNT_PUSH_PHOTO_ID
+    try:
+        await message.edit_media(
+            media=InputMediaPhoto(media=photo_id, caption=caption, parse_mode="HTML"),
+            reply_markup=reply_markup,
+        )
+    except TelegramBadRequest as e:
+        logger.warning("dpush edit_media failed for chat_id={}, sending new photo: {}", chat_id, e)
+        await bot.send_photo(
+            chat_id,
+            photo=photo_id,
+            caption=caption,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
 
 
 def _duration_from_callback(data: str, prefix: str) -> str | None:
