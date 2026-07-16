@@ -97,8 +97,8 @@ async def discount_push_reveal(callback: CallbackQuery):
     await callback.answer()
     try:
         await _edit_push_photo(callback, _REVEAL_CAPTION, keyboard_discount_push_buy())
-    except Exception as e:
-        logger.warning("dpush_reveal edit failed for %s: %s", callback.from_user.id, e)
+    except Exception:
+        logger.exception("dpush_reveal edit failed for user_id={}", callback.from_user.id)
 
 
 @router.callback_query(F.data == "dpush_buy")
@@ -106,8 +106,8 @@ async def discount_push_buy(callback: CallbackQuery):
     await callback.answer()
     try:
         await _edit_push_photo(callback, _BUY_CAPTION, keyboard_discount_push_tariffs())
-    except Exception as e:
-        logger.warning("dpush_buy edit failed for %s: %s", callback.from_user.id, e)
+    except Exception:
+        logger.exception("dpush_buy edit failed for user_id={}", callback.from_user.id)
 
 
 @router.callback_query(F.data == "dpush_back_tariffs")
@@ -115,8 +115,8 @@ async def discount_push_back_tariffs(callback: CallbackQuery):
     await callback.answer()
     try:
         await _edit_push_photo(callback, _BUY_CAPTION, keyboard_discount_push_tariffs())
-    except Exception as e:
-        logger.warning("dpush_back_tariffs edit failed for %s: %s", callback.from_user.id, e)
+    except Exception:
+        logger.exception("dpush_back_tariffs edit failed for user_id={}", callback.from_user.id)
 
 
 @router.callback_query(F.data.startswith("dpush_tariff_"))
@@ -132,8 +132,8 @@ async def discount_push_select_tariff(callback: CallbackQuery):
             _tariff_payment_caption(duration),
             keyboard_discount_push_payment(duration),
         )
-    except Exception as e:
-        logger.warning("dpush_tariff edit failed for %s: %s", callback.from_user.id, e)
+    except Exception:
+        logger.exception("dpush_tariff edit failed for user_id={}", callback.from_user.id)
 
 
 async def _create_discount_fk_payment(
@@ -342,10 +342,10 @@ async def discount_push_command(message: Message):
                         f"discount_push: отправлено — {sent} / {total}",
                     )
                 except Exception as notify_err:
-                    logger.warning("discount_push: progress notify failed: %s", notify_err)
+                    logger.warning("discount_push: progress notify failed: {}", notify_err)
         except Exception as e:
             failed += 1
-            logger.warning("discount_push: send failed user_id=%s: %s", user_id, e)
+            logger.warning("discount_push: send failed user_id={}: {}", user_id, e)
 
         await asyncio.sleep(_BROADCAST_USER_DELAY)
 
@@ -356,4 +356,4 @@ async def discount_push_command(message: Message):
         f"• Ошибок: {failed}\n"
         f"• Пропущено (не Telegram user id): {skipped_non_tg}"
     )
-    logger.success("discount_push: sent %s / %s users", sent, total)
+    logger.success("discount_push: sent {} / {} users", sent, total)
