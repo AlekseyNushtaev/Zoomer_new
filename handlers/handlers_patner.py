@@ -1,5 +1,4 @@
 import asyncio
-import urllib.parse
 from datetime import datetime
 
 from aiogram import Bot, Router, F
@@ -71,17 +70,15 @@ def _manager_bot_username() -> str:
     return BOT_URL.rstrip("/").split("/")[-1].lstrip("@")
 
 
-def _managed_bot_create_url(app_id: int) -> str:
-    username = f"white_lable_n{app_id}_bot"
-    name = urllib.parse.quote("VPN_project")
-    return f"https://t.me/newbot/{_manager_bot_username()}/{username}?name={name}"
+def _managed_bot_create_url() -> str:
+    return f"https://t.me/newbot/{_manager_bot_username()}"
 
 
-def _partner_create_menu_kb(app_id: int) -> InlineKeyboardMarkup:
+def _partner_create_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="Создать автоматически",
-            url=_managed_bot_create_url(app_id),
+            url=_managed_bot_create_url(),
             style=STYLE_SUCCESS,
         )],
         [InlineKeyboardButton(
@@ -103,14 +100,14 @@ def _partner_manual_token_kb() -> InlineKeyboardMarkup:
 
 
 async def _show_partner_create_menu(message: Message, user: User) -> None:
-    draft = await ensure_partner_draft_application(
+    await ensure_partner_draft_application(
         partner_tg_id=user.id,
         partner_username=user.username,
         partner_first_name=user.first_name,
     )
     await message.answer(
         PARTNER_CREATE_MENU_TEXT,
-        reply_markup=_partner_create_menu_kb(draft.id),
+        reply_markup=_partner_create_menu_kb(),
     )
 
 
@@ -446,7 +443,7 @@ async def partner_manual_token(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "partner_back_create_menu")
 async def partner_back_create_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    draft = await ensure_partner_draft_application(
+    await ensure_partner_draft_application(
         partner_tg_id=callback.from_user.id,
         partner_username=callback.from_user.username,
         partner_first_name=callback.from_user.first_name,
@@ -454,7 +451,7 @@ async def partner_back_create_menu(callback: CallbackQuery, state: FSMContext):
     await _safe_edit_text(
         callback.message,
         PARTNER_CREATE_MENU_TEXT,
-        reply_markup=_partner_create_menu_kb(draft.id),
+        reply_markup=_partner_create_menu_kb(),
     )
     await callback.answer()
 
