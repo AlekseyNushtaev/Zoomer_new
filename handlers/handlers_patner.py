@@ -140,7 +140,7 @@ def _admin_menu_kb() -> InlineKeyboardMarkup:
     ])
 
 
-PA_LIST_PAGE_SIZE = 10
+PA_LIST_PAGE_SIZE = 70
 
 PA_LIST_SECTIONS = {
     "pending": "📋 Заявки на модерации",
