@@ -11,9 +11,6 @@ from logging_config import logger
 
 VIDEO_FILE_ID = 'BAACAgIAAxkBAAEBk_5pmqIm8a5-5ioQ3GziIJ4dBH9PugAC_ZgAAtS92EjbvWnuAla0dDoE'
 
-NOT_SUB_CYCLE_MINUTES = 7 * 24 * 60
-NOT_CONNECT_CYCLE_MINUTES = 24 * 60
-
 
 @dataclass(frozen=True)
 class PushStage:
@@ -36,10 +33,20 @@ NOT_SUB_STAGES = (
     PushStage(8610, 8640, 'push_not_subscribed_day7_0h', keyboard='buy_free'),
 )
 
+# Как в partner_bot: день 1 — все 3; далее по одному у границ 48/72/96/120/144/168ч
 NOT_CONNECT_STAGES = (
+    # День 1
     PushStage(30, 60, 'push_not_connected_30m', keyboard='connect_only'),
     PushStage(180, 210, 'push_not_connected_3h', with_video=True, keyboard='connect_only'),
-    PushStage(1110, 1140, 'push_not_connected_24h', keyboard='connect_only'),
+    PushStage(1410, 1440, 'push_not_connected_24h', keyboard='connect_only'),
+    # День 2 (48ч) — 1-е, день 3 (72ч) — 2-е, день 4 (96ч) — 3-е
+    PushStage(2850, 2880, 'push_not_connected_30m', keyboard='connect_only'),
+    PushStage(4290, 4320, 'push_not_connected_3h', with_video=True, keyboard='connect_only'),
+    PushStage(5730, 5760, 'push_not_connected_24h', keyboard='connect_only'),
+    # День 5 (120ч) — 1-е, день 6 (144ч) — 2-е, день 7 (168ч) — 3-е
+    PushStage(7170, 7200, 'push_not_connected_30m', keyboard='connect_only'),
+    PushStage(8610, 8640, 'push_not_connected_3h', with_video=True, keyboard='connect_only'),
+    PushStage(10050, 10080, 'push_not_connected_24h', keyboard='connect_only'),
 )
 
 
@@ -103,9 +110,10 @@ async def _send_push(user_id: int, stage: PushStage) -> None:
 
 async def send_push_cron(debug: bool = False):
     """
-    Push по этапам после регистрации: без подписки (in_panel=False) — недельный цикл;
-    с активной подпиской (subscription_end_date > now), но без VPN (is_connect=False) —
-    суточный цикл из 3 пушей.
+    Push по этапам после регистрации (без циклов):
+    - без подписки (in_panel=False) — только первые 7 дней;
+    - с активной подпиской, но без VPN (is_connect=False) — день 1: 3 пуша,
+      дни 2–7: по одному пушу, затем стоп.
     """
     try:
         all_users = await sql.SELECT_ALL_USERS()
@@ -133,11 +141,10 @@ async def send_push_cron(debug: bool = False):
                 if not create_time:
                     continue
 
-                minutes_diff = (now - create_time).total_seconds() / 60
+                minutes_diff = int((now - create_time).total_seconds() / 60)
 
                 if not user_data[4]:  # in_panel: нет подписки в панели
-                    offset = minutes_diff % NOT_SUB_CYCLE_MINUTES
-                    stage = _find_stage(int(offset), NOT_SUB_STAGES)
+                    stage = _find_stage(minutes_diff, NOT_SUB_STAGES)
                     if stage:
                         try:
                             await _send_push(user_id, stage)
@@ -153,8 +160,7 @@ async def send_push_cron(debug: bool = False):
                     subscription_end_date = user_data[9]
                     if not subscription_end_date or subscription_end_date < now:
                         continue
-                    offset = minutes_diff % NOT_CONNECT_CYCLE_MINUTES
-                    stage = _find_stage(int(offset), NOT_CONNECT_STAGES)
+                    stage = _find_stage(minutes_diff, NOT_CONNECT_STAGES)
                     if stage:
                         try:
                             await _send_push(user_id, stage)
