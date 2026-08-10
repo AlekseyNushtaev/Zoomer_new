@@ -56,7 +56,7 @@ function subPagePayFromBuild(): { apiBase: string; apiKey: string } {
     }
 }
 
-type DurationId = '7' | '30' | '90' | '180' | '5000'
+type DurationId = '7' | '30' | '90' | '180' | '365' | '5000'
 type PayMethodId = 'fk_sbp' | 'fk_card' | 'stars' | 'cryptobot'
 
 const PAY_METHODS: ReadonlyArray<{ id: PayMethodId; label: string }> = [
@@ -196,9 +196,10 @@ function SubscriptionPayBlock({ isMobile }: { isMobile: boolean }) {
     const tariffStack = (
         <Stack gap="sm">
             {tariffBtn('Пробный тариф — 7 дней — 99 ₽', '7')}
-            {tariffBtn('30 дней — 249 ₽', '30')}
-            {tariffBtn('90 дней — 539 ₽ (выгода −40%)', '90')}
-            {tariffBtn('180 дней — 999 ₽ (выгода −50%)', '180')}
+            {tariffBtn('30 дней — 299 ₽', '30')}
+            {tariffBtn('90 дней — 749 ₽ (выгода −17%)', '90')}
+            {tariffBtn('180 дней — 1349 ₽ (выгода −25%)', '180')}
+            {tariffBtn('365 дней — 2399 ₽ (выгода −33%)', '365')}
             {tariffBtn('Навсегда — 3490 ₽', '5000')}
         </Stack>
     )

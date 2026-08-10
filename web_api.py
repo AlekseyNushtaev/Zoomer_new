@@ -185,6 +185,7 @@ TARIFF_PUBLIC = [
     ("90", "90 дней", 5, False),
     ("120", "120 дней (акция)", 5, True),
     ("180", "180 дней", 5, False),
+    ("365", "365 дней", 5, False),
     ("5000", "Навсегда", 5, False),
 ]
 
@@ -464,7 +465,7 @@ class CreatePaymentIn(BaseModel):
     is_gift: bool = False
 
 
-SubPageDuration = Literal["7", "30", "90", "180", "5000"]
+SubPageDuration = Literal["7", "30", "90", "180", "365", "5000"]
 SUB_PAGE_PAYLOAD_SOURCE = SUBPAGE
 
 sub_page_api_key_header = APIKeyHeader(

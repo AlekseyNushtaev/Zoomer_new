@@ -437,12 +437,14 @@ def _parse_export_users_rows(path: str) -> Tuple[List[Tuple[int, datetime, Optio
 def _casual_days_by_amount(amount: int) -> Optional[int]:
     if amount == 99:
         return 7
-    if amount in (149, 249):
+    if amount in (149, 249, 299):
         return 30
-    if amount == 539:
+    if amount in (539, 749):
         return 90
-    if amount == 999:
+    if amount in (999, 1349):
         return 180
+    if amount == 2399:
+        return 365
     return None
 
 
@@ -559,7 +561,7 @@ async def import_pays_start(message: Message) -> None:
     await message.answer(
         "💳 Отправьте <b>.xlsx</b> с платежами (лист <code>payments_sbp</code> как в "
         "<code>/export</code>): колонки <code>User ID</code>, <code>Amount</code>.\n\n"
-        "Обычные суммы: 99→+7д, 149/249→+30д, 539→+90д, 999→+180д; суммы <code>1</code> и "
+        "Обычные суммы: 99→+7д, 149/249/299→+30д, 539/749→+90д, 999/1349→+180д, 2399→+365д; суммы <code>1</code> и "
         "<code>399</code> обрабатываются отдельно (399 — white +30д).\n\n"
         "📎 До <b>20 МБ</b>.\n\n"
         "Отмена: <code>/import_pays_cancel</code>",

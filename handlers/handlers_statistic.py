@@ -47,8 +47,12 @@ def convert_stars_to_rub(amount: int) -> Optional[int]:
         99: 99,
         149: 149,
         249: 249,
+        299: 299,
         539: 539,
+        749: 749,
         999: 999,
+        1349: 1349,
+        2399: 2399,
         3490: 3490,
         199: 199,
         399: 399,
@@ -108,12 +112,14 @@ def _sync_build_analytics_excel(monthly_data: dict, daily_data_by_month: dict) -
         ('Пользователей на конец месяца', 'cumulative_users'),
         ('Платежей 99₽ (шт)', 'sum_99_count'),
         ('Сумма 99₽ (₽)', 'sum_99_amount'),
-        ('Платежей 249₽ (шт)', 'sum_249_count'),
-        ('Сумма 249₽ (₽)', 'sum_249_amount'),
-        ('Платежей 539₽ (шт)', 'sum_539_count'),
-        ('Сумма 539₽ (₽)', 'sum_539_amount'),
-        ('Платежей 999₽ (шт)', 'sum_999_count'),
-        ('Сумма 999₽ (₽)', 'sum_999_amount'),
+        ('Платежей 30д (шт)', 'sum_30_count'),
+        ('Сумма 30д (₽)', 'sum_30_amount'),
+        ('Платежей 90д (шт)', 'sum_90_count'),
+        ('Сумма 90д (₽)', 'sum_90_amount'),
+        ('Платежей 180д (шт)', 'sum_180_count'),
+        ('Сумма 180д (₽)', 'sum_180_amount'),
+        ('Платежей 365д (шт)', 'sum_365_count'),
+        ('Сумма 365д (₽)', 'sum_365_amount'),
         ('Платежей 3490₽ (шт)', 'sum_3490_count'),
         ('Сумма 3490₽ (₽)', 'sum_3490_amount'),
         ('Подарков (шт)', 'gift_count'),
@@ -653,9 +659,10 @@ async def analytics_export(message: Message):
 
                 # Разбивка по суммам (новые тарифы; старые суммы включаются в ближайший ярус)
                 sum_99_count = sum_99_amount = 0
-                sum_249_count = sum_249_amount = 0
-                sum_539_count = sum_539_amount = 0
-                sum_999_count = sum_999_amount = 0
+                sum_30_count = sum_30_amount = 0
+                sum_90_count = sum_90_amount = 0
+                sum_180_count = sum_180_amount = 0
+                sum_365_count = sum_365_amount = 0
                 sum_3490_count = sum_3490_amount = 0
                 gift_count = gift_amount = 0
 
@@ -667,15 +674,18 @@ async def analytics_export(message: Message):
                         if amount == 99:
                             sum_99_count += 1
                             sum_99_amount += amount
-                        elif amount in (249, 179):
-                            sum_249_count += 1
-                            sum_249_amount += amount
-                        elif amount in (539, 369, 269, 299):
-                            sum_539_count += 1
-                            sum_539_amount += amount
-                        elif amount in (999, 699, 499):
-                            sum_999_count += 1
-                            sum_999_amount += amount
+                        elif amount in (299, 249, 179):
+                            sum_30_count += 1
+                            sum_30_amount += amount
+                        elif amount in (749, 539, 369, 269):
+                            sum_90_count += 1
+                            sum_90_amount += amount
+                        elif amount in (1349, 999, 699, 499):
+                            sum_180_count += 1
+                            sum_180_amount += amount
+                        elif amount == 2399:
+                            sum_365_count += 1
+                            sum_365_amount += amount
                         elif amount == 3490:
                             sum_3490_count += 1
                             sum_3490_amount += amount
@@ -703,12 +713,14 @@ async def analytics_export(message: Message):
                     'cumulative_users': cumulative_users,
                     'sum_99_count': sum_99_count,
                     'sum_99_amount': sum_99_amount,
-                    'sum_249_count': sum_249_count,
-                    'sum_249_amount': sum_249_amount,
-                    'sum_539_count': sum_539_count,
-                    'sum_539_amount': sum_539_amount,
-                    'sum_999_count': sum_999_count,
-                    'sum_999_amount': sum_999_amount,
+                    'sum_30_count': sum_30_count,
+                    'sum_30_amount': sum_30_amount,
+                    'sum_90_count': sum_90_count,
+                    'sum_90_amount': sum_90_amount,
+                    'sum_180_count': sum_180_count,
+                    'sum_180_amount': sum_180_amount,
+                    'sum_365_count': sum_365_count,
+                    'sum_365_amount': sum_365_amount,
                     'sum_3490_count': sum_3490_count,
                     'sum_3490_amount': sum_3490_amount,
                     'gift_count': gift_count,
