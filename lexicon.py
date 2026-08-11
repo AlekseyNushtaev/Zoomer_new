@@ -14,8 +14,8 @@ lexicon = {
     '2️⃣ Или "<b>💰 Купить подписку</b>" — сразу выбрать платный тариф\n\n'
           f'Не получилось? - напишите в <a href="{SUPPORT_URL}">Поддержку</a> или на почту Zoomerskysupp@proton.me\n\n'
             'При использование наших услуг вы автоматически соглашаетесь на наши:\n\n'
-          ' - <a href="https://telegra.ph/Polzovatelskoe-soglashenie-12-30-35">Пользовательское соглашение.</a>\n'
-          ' - <a href="https://telegra.ph/Politika-konfidencialnosti-12-30-37">Политика конфиденциальности.</a>',
+          ' - <a href="https://telegra.ph/Polzovatelskoe-soglashenie-08-11-20">Пользовательское соглашение.</a>\n'
+          ' - <a href="https://telegra.ph/Politika-konfidencialnosti-08-11-52">Политика конфиденциальности.</a>',
 
     'start': '<b>Добро пожаловать!</b>\n\n'
           'Это безопасный VPN-сервис, сделанный с качеством и заботой. Создан для себя и друзей. \n\n'
@@ -25,8 +25,8 @@ lexicon = {
           '2️⃣ Нажмите на кнопку "<b>🔗 Подключить VPN</b>" и следуйте инструкциям из этого раздела\n\n'
           f'Не получилось? - напишите в <a href="{SUPPORT_URL}">Поддержку</a> или на почту Zoomerskysupp@proton.me\n\n'
           'При использование наших услуг вы автоматически соглашаетесь на наши:\n\n'
-          ' - <a href="https://telegra.ph/Polzovatelskoe-soglashenie-12-30-35">Пользовательское соглашение.</a>\n'
-          ' - <a href="https://telegra.ph/Politika-konfidencialnosti-12-30-37">Политика конфиденциальности.</a>',
+          ' - <a href="https://telegra.ph/Polzovatelskoe-soglashenie-08-11-20">Пользовательское соглашение.</a>\n'
+          ' - <a href="https://telegra.ph/Politika-konfidencialnosti-08-11-52">Политика конфиденциальности.</a>',
 
     'buy': '✅ Мы гарантируем работу сервиса и вернем деньги, если у вас не будет работать наш VPN\n\n' 
                  '• Соцсети без рекламы \n'
