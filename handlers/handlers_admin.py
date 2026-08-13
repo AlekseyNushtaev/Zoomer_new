@@ -1496,6 +1496,16 @@ async def add_traffic_all_command(message: Message):
     )
 
 
+@router.message(Command(commands=['reset_field_bool_2']))
+async def reset_field_bool_2_all_command(message: Message):
+    """Сброс field_bool_2 у всех пользователей."""
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    n = await sql.reset_field_bool_2_all()
+    await message.answer(f"Готово: field_bool_2 = false у {n} записей в users.")
+    logger.info(f"Админ {message.from_user.id}: сброс field_bool_2 для всех, обновлено строк: {n}")
+
+
 @router.message(Command(commands=['reset_bool3']))
 async def reset_field_bool_3_all_command(message: Message):
     """Сброс field_bool_3 у всех пользователей (триал / одноразовые акции)."""
