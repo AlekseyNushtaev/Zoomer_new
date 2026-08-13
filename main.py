@@ -9,7 +9,7 @@ from bot import bot
 from config import ADMIN_IDS, THROTTLE_MAX_UPDATES, THROTTLE_WINDOW_SEC, WEB_API_PORT
 from middleware.user_throttle import UserThrottleMiddleware
 from config_bd.models import create_tables, engine
-from payments import pay_stars, pay_cryptobot, pay_platega, pay_freekassa
+from payments import pay_stars, pay_cryptobot, pay_platega, pay_freekassa, pay_wl_traffic
 # from payments import pay_wata
 from sheduler.check_connect import check_connect
 from sheduler.check_cryptobot import check_cryptobot_payments
@@ -18,6 +18,9 @@ from sheduler.check_platega import check_platega, check_platega_card, check_plat
 from sheduler.check_wata_sbp import check_wata_sbp
 from sheduler.check_wata_card import check_wata_card
 from sheduler.check_fk import check_fk
+from sheduler.check_wl_traffic import check_wl_traffic_cron
+from sheduler.accumulate_wl_traffic import accumulate_wl_traffic_cron
+from sheduler.credit_forever_wl_monthly import credit_forever_wl_monthly_cron
 from handlers import (
     handlers_user,
     handlers_statistic,
@@ -29,12 +32,16 @@ from handlers import (
     handlers_import,
     handlers_devices,
     handlers_patner,
+    handlers_wl_traffic,
 )
 from sheduler.time_mes import send_message_cron
 from logging_config import logger
 from sheduler.time_mes_not_sub import send_push_cron
 from sheduler.pg_dump_backup import pg_dump_backup_cron
 from web_api import app as web_app
+from config_bd.migrate_users_wl_fields import migrate as migrate_wl_fields
+from config_bd.migrate_wl_traffic_meta import migrate as migrate_wl_traffic_meta
+from wl_traffic.constants import WL_ACCUMULATE_HOUR, WL_ACCUMULATE_MINUTE
 
 
 async def set_commands(bot: Bot):
@@ -63,6 +70,7 @@ async def main() -> None:
     dp.include_router(handlers_import.router)
     dp.include_router(handlers_devices.router)
     dp.include_router(handlers_user.router)
+    dp.include_router(handlers_wl_traffic.router)
     dp.include_router(handlers_export.router)
     dp.include_router(handlers_excel_restore.router)
     dp.include_router(handlers_statistic.router)
@@ -71,6 +79,7 @@ async def main() -> None:
     dp.include_router(pay_freekassa.router)
     # dp.include_router(pay_wata.router)
     dp.include_router(pay_cryptobot.router)
+    dp.include_router(pay_wl_traffic.router)
 
     # Запуск шедулера
     scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
@@ -84,6 +93,31 @@ async def main() -> None:
     scheduler.add_job(check_fk, trigger='interval', minutes=1, misfire_grace_time=10)
     scheduler.add_job(check_cryptobot_payments, trigger='interval', minutes=1, misfire_grace_time=10)
     scheduler.add_job(send_push_cron, trigger='interval', minutes=30, misfire_grace_time=60)
+    scheduler.add_job(
+        check_wl_traffic_cron,
+        trigger='interval',
+        minutes=30,
+        args=[bot],
+        misfire_grace_time=600,
+    )
+    scheduler.add_job(
+        accumulate_wl_traffic_cron,
+        trigger='cron',
+        hour=WL_ACCUMULATE_HOUR,
+        minute=WL_ACCUMULATE_MINUTE,
+        id='wl_traffic_accumulate',
+        misfire_grace_time=600,
+    )
+    scheduler.add_job(
+        credit_forever_wl_monthly_cron,
+        trigger='cron',
+        day=1,
+        hour=0,
+        minute=5,
+        args=[bot],
+        id='wl_forever_monthly',
+        misfire_grace_time=3600,
+    )
     scheduler.add_job(check_online_daily, 'cron', hour=2, minute=55, id='daily_online_stats', misfire_grace_time=60)
     scheduler.add_job(
         pg_dump_backup_cron,

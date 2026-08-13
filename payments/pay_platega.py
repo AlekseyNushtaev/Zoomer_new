@@ -11,6 +11,7 @@ from lexicon import dct_price, dct_desc, lexicon
 from logging_config import logger
 from payments.payment_limits import payment_creation_allowed
 from payments.payload_source import BOT
+from payments.tariff_gate import normalize_tariff_duration_key
 
 router = Router()
 
@@ -223,8 +224,7 @@ async def process_payment_sbp(callback: CallbackQuery):
     if 'white' in duration:
         duration = duration.replace('white_', '')
         white_flag = True
-    if 'old' in duration:
-        duration = duration.replace('old', '')
+    duration = normalize_tariff_duration_key(duration)
 
     tg_uname = callback.from_user.username
     if gift_flag:
@@ -250,7 +250,7 @@ async def process_payment_sbp(callback: CallbackQuery):
 
     if payment_info['status'] == 'pending':
         try:
-            text = lexicon['payment_link']
+            text = lexicon['payment_link'].format(wl_bonus='')
             if white_flag:
                 text = lexicon['payment_link_white']
             if 'gift' in callback.data:
@@ -292,8 +292,7 @@ async def process_payment_card(callback: CallbackQuery):
     if 'white' in duration:
         duration = duration.replace('white_', '')
         white_flag = True
-    if 'old' in duration:
-        duration = duration.replace('old', '')
+    duration = normalize_tariff_duration_key(duration)
 
     tg_uname = callback.from_user.username
     if gift_flag:
@@ -319,7 +318,7 @@ async def process_payment_card(callback: CallbackQuery):
 
     if payment_info['status'] == 'pending':
         try:
-            text = lexicon['payment_link']
+            text = lexicon['payment_link'].format(wl_bonus='')
             if white_flag:
                 text = lexicon['payment_link_white']
             if 'gift' in callback.data:

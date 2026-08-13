@@ -83,12 +83,14 @@ def keyboard_start(user_id: Optional[int] = None):
         styles={
             "buy_vpn": STYLE_SUCCESS,
             "connect_vpn": STYLE_PRIMARY,
+            "user_profile": STYLE_PRIMARY,
             "manage_devices": STYLE_PRIMARY,
             "ref": STYLE_PRIMARY,
             "buy_gift": STYLE_SUCCESS,
         },
         buy_vpn='💰 Купить подписку',
         connect_vpn='🔗 Подключить VPN',
+        user_profile='👤 Профиль',
         manage_devices='📱 Управление устройствами',
         ref='👭 Бесплатный VPN за приглашения',
         buy_gift='🎁 Подарить подписку',
@@ -140,14 +142,15 @@ _STYLES_TARIFF = {
 def keyboard_tariff_bonus():
     return create_kb(
         1,
-        styles=_STYLES_TARIFF,
+        styles={**_STYLES_TARIFF, "wl_traffic_buy_sub": STYLE_SUCCESS},
         r_7='👌 7 дней — 99 руб',
         r_30='🤝 30 дней — 299 руб',
         r_90='✅ 90 дней — 749 руб (выгода −17%)',
         r_180='🏆 180 дней — 1349 руб (выгода −25%)',
         r_365='💎 365 дней — 2399 руб (выгода −33%)',
-        r_5000='♾️ Навсегда — 3490 руб',
+        r_5000='♾️ Навсегда — 4990 руб',
         free_vpn='🔥ПОПРОБОВАТЬ 1 день БЕСПЛАТНО🔥',
+        wl_traffic_buy_sub='📦 Купить трафик Антиглушилка',
         back_to_main='🔙 Назад',
     )
 
@@ -155,13 +158,17 @@ def keyboard_tariff_bonus():
 def keyboard_tariff():
     return create_kb(
         1,
-        styles={k: v for k, v in _STYLES_TARIFF.items() if k != "free_vpn"},
+        styles={
+            **{k: v for k, v in _STYLES_TARIFF.items() if k != "free_vpn"},
+            "wl_traffic_buy_sub": STYLE_SUCCESS,
+        },
         r_7='👌 7 дней — 99 руб',
         r_30='🤝 30 дней — 299 руб',
         r_90='✅ 90 дней — 749 руб (выгода −17%)',
         r_180='🏆 180 дней — 1349 руб (выгода −25%)',
         r_365='💎 365 дней — 2399 руб (выгода −33%)',
-        r_5000='♾️ Навсегда — 3490 руб',
+        r_5000='♾️ Навсегда — 4990 руб',
+        wl_traffic_buy_sub='📦 Купить трафик Антиглушилка',
         back_to_main='🔙 Назад',
     )
 
@@ -169,14 +176,18 @@ def keyboard_tariff():
 def keyboard_tariff_trial():
     return create_kb(
         1,
-        styles={k: v for k, v in _STYLES_TARIFF.items() if k != "free_vpn"},
+        styles={
+            **{k: v for k, v in _STYLES_TARIFF.items() if k != "free_vpn"},
+            "wl_traffic_buy_sub": STYLE_SUCCESS,
+        },
         r_7='👌 7 дней — 99 руб',
         r_30='🤝 30 дней — 299 руб',
         r_90='✅ 90 дней — 749 руб (выгода −17%)',
         r_120='🔥 Акция: 120 дней — 749 руб',
         r_180='🏆 180 дней — 1349 руб (выгода −25%)',
         r_365='💎 365 дней — 2399 руб (выгода −33%)',
-        r_5000='♾️ Навсегда — 3490 руб',
+        r_5000='♾️ Навсегда — 4990 руб',
+        wl_traffic_buy_sub='📦 Купить трафик Антиглушилка',
         back_to_main='🔙 Назад',
     )
 
@@ -217,7 +228,7 @@ def keyboard_gift_tariff():
         gift_r_90='✅ 90 дней — 749 руб (выгода −17%)',
         gift_r_180='🏆 180 дней — 1349 руб (выгода −25%)',
         gift_r_365='💎 365 дней — 2399 руб (выгода −33%)',
-        gift_r_5000='♾️ Навсегда — 3490 руб',
+        gift_r_5000='♾️ Навсегда — 4990 руб',
         back_to_main='🔙 Назад',
     )
 
@@ -762,4 +773,68 @@ def keyboard_partner_withdraw(support_url: str):
                 style=STYLE_PRIMARY,
             )
         ],
+    ])
+
+
+def keyboard_profile() -> InlineKeyboardMarkup:
+    return create_kb(
+        1,
+        styles={
+            "wl_traffic_buy": STYLE_SUCCESS,
+            "back_to_main": STYLE_PRIMARY,
+        },
+        wl_traffic_buy="📦 Купить трафик",
+        back_to_main=BTN_BACK,
+    )
+
+
+def keyboard_wl_traffic_tariffs(*, back_callback: str = "back_to_main") -> InlineKeyboardMarkup:
+    labels = {
+        "10": "10 GB — 50 ₽",
+        "20": "20 GB — 79 ₽",
+        "50": "50 GB — 149 ₽",
+        "100": "100 GB — 259 ₽",
+        "250": "250 GB — 629 ₽",
+        "500": "500 GB — 1249 ₽",
+    }
+    from_sub = back_callback == "buy_vpn"
+    buttons = []
+    for mb, label in labels.items():
+        cb = f"wl_traffic_sub_{mb}" if from_sub else f"wl_traffic_{mb}"
+        buttons.append([
+            InlineKeyboardButton(
+                text=label,
+                callback_data=cb,
+                style=STYLE_SUCCESS if mb in ("50", "100", "250", "500") else STYLE_PRIMARY,
+            )
+        ])
+    buttons.append([InlineKeyboardButton(text=BTN_BACK, callback_data=back_callback)])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def keyboard_wl_traffic_payment_method(
+    mb: str, *, back_callback: str = "wl_traffic_buy"
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="⚡СБП",
+            callback_data=f"wl_traffic_sbp_{mb}",
+            style=STYLE_SUCCESS,
+        )],
+        [InlineKeyboardButton(
+            text="💳 Карта РФ",
+            callback_data=f"wl_traffic_card_{mb}",
+            style=STYLE_PRIMARY,
+        )],
+        [InlineKeyboardButton(
+            text="⭐️ Telegram Stars",
+            callback_data=f"wl_traffic_stars_{mb}",
+            style=STYLE_PRIMARY,
+        )],
+        [InlineKeyboardButton(
+            text="💎 Crypto bot",
+            callback_data=f"wl_traffic_crypto_{mb}",
+            style=STYLE_PRIMARY,
+        )],
+        [InlineKeyboardButton(text=BTN_BACK, callback_data=back_callback)],
     ])

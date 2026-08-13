@@ -54,6 +54,8 @@ def convert_stars_to_rub(amount: int) -> Optional[int]:
         1349: 1349,
         2399: 2399,
         3490: 3490,
+        4990: 4990,
+        2790: 2790,
         199: 199,
         399: 399,
         # прежние суммы Stars → эквивалент в ₽ для отчётов
@@ -120,8 +122,8 @@ def _sync_build_analytics_excel(monthly_data: dict, daily_data_by_month: dict) -
         ('Сумма 180д (₽)', 'sum_180_amount'),
         ('Платежей 365д (шт)', 'sum_365_count'),
         ('Сумма 365д (₽)', 'sum_365_amount'),
-        ('Платежей 3490₽ (шт)', 'sum_3490_count'),
-        ('Сумма 3490₽ (₽)', 'sum_3490_amount'),
+        ('Платежей Навсегда (шт)', 'sum_3490_count'),
+        ('Сумма Навсегда (₽)', 'sum_3490_amount'),
         ('Подарков (шт)', 'gift_count'),
         ('Сумма подарков (₽)', 'gift_amount'),
     ]
@@ -686,7 +688,7 @@ async def analytics_export(message: Message):
                         elif amount == 2399:
                             sum_365_count += 1
                             sum_365_amount += amount
-                        elif amount == 3490:
+                        elif amount in (3490, 4990, 2790):
                             sum_3490_count += 1
                             sum_3490_amount += amount
 

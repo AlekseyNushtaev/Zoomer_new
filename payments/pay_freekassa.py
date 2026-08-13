@@ -19,7 +19,7 @@ from keyboard import keyboard_payment_sbp, create_kb
 from lexicon import dct_price, dct_desc, lexicon
 from logging_config import logger
 from payments.payment_limits import payment_creation_allowed
-from payments.tariff_gate import is_mobile_tariff_key
+from payments.tariff_gate import is_mobile_tariff_key, normalize_tariff_duration_key
 from payments.payload_source import BOT, SITE
 
 router = Router()
@@ -366,8 +366,7 @@ async def _handle_wata_style_callback(callback: CallbackQuery, ui_kind: UiKind) 
     if "white" in duration:
         duration = duration.replace("white_", "")
         white_flag = True
-    if "old" in duration:
-        duration = duration.replace("old", "")
+    duration = normalize_tariff_duration_key(duration)
 
     if gift_flag:
         payment_info = await pay_for_gift(
@@ -393,7 +392,7 @@ async def _handle_wata_style_callback(callback: CallbackQuery, ui_kind: UiKind) 
 
     if payment_info["status"] == "pending":
         try:
-            text = lexicon["payment_link"]
+            text = lexicon["payment_link"].format(wl_bonus="")
             if white_flag:
                 text = lexicon["payment_link_white"]
             if gift_flag:

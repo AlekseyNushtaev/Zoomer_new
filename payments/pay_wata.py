@@ -11,6 +11,7 @@ from bot import sql
 from config import ADMIN_IDS, BOT_URL, PAYMENT_MAX_PENDING_PER_USER, WATA_API_BASE, WATA_API_CARD_KEY, WATA_API_SBP_KEY
 from payments.payment_limits import payment_creation_allowed
 from payments.payload_source import BOT, SITE
+from payments.tariff_gate import normalize_tariff_duration_key
 from keyboard import keyboard_payment_sbp, create_kb
 from lexicon import dct_price, dct_desc, lexicon
 from logging_config import logger
@@ -394,8 +395,7 @@ async def process_payment_wata_sbp(callback: CallbackQuery):
     if "white" in duration:
         duration = duration.replace("white_", "")
         white_flag = True
-    if "old" in duration:
-        duration = duration.replace("old", "")
+    duration = normalize_tariff_duration_key(duration)
 
     tg_uname = callback.from_user.username
     if gift_flag:
@@ -421,7 +421,7 @@ async def process_payment_wata_sbp(callback: CallbackQuery):
 
     if payment_info["status"] == "pending":
         try:
-            text = lexicon["payment_link"]
+            text = lexicon["payment_link"].format(wl_bonus="")
             if white_flag:
                 text = lexicon["payment_link_white"]
             if gift_flag:
@@ -457,8 +457,7 @@ async def process_payment_wata_card(callback: CallbackQuery):
     if "white" in duration:
         duration = duration.replace("white_", "")
         white_flag = True
-    if "old" in duration:
-        duration = duration.replace("old", "")
+    duration = normalize_tariff_duration_key(duration)
 
     tg_uname = callback.from_user.username
     if gift_flag:
@@ -484,7 +483,7 @@ async def process_payment_wata_card(callback: CallbackQuery):
 
     if payment_info["status"] == "pending":
         try:
-            text = lexicon["payment_link"]
+            text = lexicon["payment_link"].format(wl_bonus="")
             if white_flag:
                 text = lexicon["payment_link_white"]
             if gift_flag:

@@ -214,7 +214,7 @@ async def _create_discount_fk_payment(
 
     btn = "⚡ Оплатить СБП" if ui_kind == "sbp" else "💳 Оплатить картой РФ"
     if payment_info["status"] == "pending":
-        text = lexicon["payment_link"] + "\n\nДля оплаты тарифа перейдите по ссылке:"
+        text = lexicon["payment_link"].format(wl_bonus="") + "\n\nДля оплаты тарифа перейдите по ссылке:"
         await _delete_and_answer(
             callback,
             text,
@@ -286,7 +286,7 @@ async def discount_push_pay_crypto(callback: CallbackQuery):
     )
 
     if result["status"] == "pending":
-        text = lexicon["payment_link"] + "\n\nДля оплаты тарифа перейдите по ссылке:"
+        text = lexicon["payment_link"].format(wl_bonus="") + "\n\nДля оплаты тарифа перейдите по ссылке:"
         pay_keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(
                 text=f"💎 Оплатить криптовалютой ({rub_amount} ₽)",
@@ -336,7 +336,7 @@ async def discount_push_pay_stars(callback: CallbackQuery):
     await bot.send_invoice(
         callback.from_user.id,
         title=title,
-        description=lexicon["payment_link"],
+        description=lexicon["payment_link"].format(wl_bonus=""),
         prices=prices,
         provider_token="",
         payload=payload,

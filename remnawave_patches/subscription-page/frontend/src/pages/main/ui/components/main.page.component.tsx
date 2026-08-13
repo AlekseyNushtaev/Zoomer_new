@@ -200,7 +200,7 @@ function SubscriptionPayBlock({ isMobile }: { isMobile: boolean }) {
             {tariffBtn('90 дней — 749 ₽ (выгода −17%)', '90')}
             {tariffBtn('180 дней — 1349 ₽ (выгода −25%)', '180')}
             {tariffBtn('365 дней — 2399 ₽ (выгода −33%)', '365')}
-            {tariffBtn('Навсегда — 3490 ₽', '5000')}
+            {tariffBtn('Навсегда — 4990 ₽', '5000')}
         </Stack>
     )
 

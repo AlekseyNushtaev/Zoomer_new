@@ -867,6 +867,7 @@ async def trial_activate(ctx: JwtCtx):
             await sql.update_in_panel(billing_uid)
         else:
             await sql.add_user(billing_uid, True)
+        await sql.init_wl_trial_limits(billing_uid)
 
         sub_url = await x3.sublink(panel_un)
         await post_user_trial(billing_uid)
@@ -896,6 +897,7 @@ async def trial_activate(ctx: JwtCtx):
         await sql.update_in_panel(user_id)
     else:
         await sql.add_user(user_id, True)
+    await sql.init_wl_trial_limits(user_id)
 
     sub_url = await x3.sublink(str(user_id))
     await post_user_trial(user_id)
@@ -1064,7 +1066,7 @@ async def sub_page_pay_stars(body: SubPagePayIn, request: Request, _: SubPageAut
     prices = [LabeledPrice(label="XTR", amount=stars_amount)]
     dur_label = "30" if duration_str == "30secret" else duration_str
     title = f"Оплата подписки на {dur_label} дней."
-    description = lexicon["payment_link_white"] if white else lexicon["payment_link"]
+    description = lexicon["payment_link_white"] if white else lexicon["payment_link"].format(wl_bonus="")
 
     try:
         await bot.send_invoice(
@@ -1167,6 +1169,9 @@ async def gift_activate(ctx: JwtCtx, gift_id: str):
     result_active = await x3.activ(user_id_str)
     subscription_time = result_active.get("time", "-")
     await sql.update_in_panel(user_id)
+    if not white_flag:
+        from wl_traffic.service import credit_wl_subscription_bonus
+        await credit_wl_subscription_bonus(sql, user_id, int(duration))
 
     return {
         "success": True,
@@ -1228,6 +1233,9 @@ async def gift_activate_web(gift_id: str):
     result_active = await x3.activ(panel_username)
     subscription_time = result_active.get("time", "-")
     await sql.update_in_panel(db_user_id)
+    if not white_flag:
+        from wl_traffic.service import credit_wl_subscription_bonus
+        await credit_wl_subscription_bonus(sql, db_user_id, int(duration))
 
     subscription_url = await x3.sublink(panel_username)
     devices = 1 if white_flag else 5

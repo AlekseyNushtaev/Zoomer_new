@@ -60,6 +60,16 @@ class Users(Base):
     partner_balance = Column(Integer, default=0)
     partner_pay = Column(Integer, default=0)
     partner_flag = Column(Boolean, default=False)
+    trafic_wl = Column(Float, default=0.0)
+    limit_wl = Column(Float, default=0.0)
+
+
+class WlTrafficMeta(Base):
+    """Глобальное состояние учёта WL-трафика (одна строка id=1)."""
+    __tablename__ = 'wl_traffic_meta'
+
+    id = Column(Integer, primary_key=True, default=1)
+    last_closed_date = Column(Date, nullable=True)
 
 
 class Gifts(Base):

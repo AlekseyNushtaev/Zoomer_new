@@ -22,6 +22,7 @@ from config_bd.models import (
     PaymentsFkSBP,
     LinkingCodes,
     PasswordResetCodes,
+    WlTrafficMeta,
 )
 from lexicon import dct_price
 from logging_config import logger
@@ -36,6 +37,8 @@ _LEGACY_BILLING_AMOUNT_TO_DAYS: Dict[int, int] = {
     99: 30,
     269: 120,
     499: 180,
+    3490: 5000,
+    2790: 5000,
 }
 
 
@@ -57,6 +60,8 @@ def _billing_days_for_tariff_key(key: str) -> Optional[int]:
         return 365
     if key == "5000":
         return 5000
+    if key == "5000sale":
+        return 5000
     if key == "30secret":
         return 30
     return None
@@ -69,6 +74,8 @@ def _payload_duration_to_panel_days(raw: Optional[str]) -> Optional[int]:
     s = str(raw).strip()
     if s == "30secret":
         return 30
+    if s == "5000sale":
+        return 5000
     try:
         v = int(s)
         return v if v > 0 else None
@@ -162,6 +169,8 @@ def _user_tuple(user: Users) -> Tuple:
         user.partner_balance,
         user.partner_pay,
         user.partner_flag,
+        user.trafic_wl,
+        user.limit_wl,
     )
 
 
@@ -920,6 +929,179 @@ class AsyncSQL:
             await session.execute(stmt)
             await session.commit()
 
+    async def reset_field_bool_2_all(self) -> int:
+        """Всем строкам users: field_bool_2 = False. Возвращает число обновлённых записей."""
+        async with self.session_factory() as session:
+            result = await session.execute(update(Users).values(field_bool_2=False))
+            await session.commit()
+            return int(result.rowcount or 0)
+
+    async def init_wl_trial_limits(self, user_id: int) -> None:
+        """При первом триале (limit_wl=0): trafic_wl=0, limit_wl=2 GB. Иначе не трогаем."""
+        from wl_traffic.constants import WL_TRIAL_LIMIT_GB
+
+        async with self.session_factory() as session:
+            stmt = (
+                update(Users)
+                .where(
+                    Users.user_id == user_id,
+                    or_(Users.limit_wl.is_(None), Users.limit_wl <= 0),
+                )
+                .values(trafic_wl=0.0, limit_wl=WL_TRIAL_LIMIT_GB)
+            )
+            await session.execute(stmt)
+            await session.commit()
+
+    async def add_wl_limit(self, user_id: int, gb: float) -> None:
+        async with self.session_factory() as session:
+            stmt = select(Users).where(Users.user_id == user_id)
+            result = await session.execute(stmt)
+            user = result.scalar_one_or_none()
+            if user is None:
+                return
+            current = float(user.limit_wl or 0.0)
+            user.limit_wl = round(current + gb, 2)
+            if gb > 0:
+                user.field_bool_2 = False
+            await session.commit()
+
+    async def update_trafic_wl(self, user_id: int, gb: float) -> None:
+        async with self.session_factory() as session:
+            stmt = (
+                update(Users)
+                .where(Users.user_id == user_id)
+                .values(trafic_wl=round(gb, 2))
+            )
+            await session.execute(stmt)
+            await session.commit()
+
+    async def add_trafic_wl(self, user_id: int, gb: float) -> None:
+        """Прибавляет GB к накопленному trafic_wl (ежедневное накопление с панели)."""
+        if gb <= 0:
+            return
+        async with self.session_factory() as session:
+            stmt = select(Users).where(Users.user_id == user_id)
+            result = await session.execute(stmt)
+            user = result.scalar_one_or_none()
+            if user is None:
+                return
+            current = float(user.trafic_wl or 0.0)
+            user.trafic_wl = round(current + gb, 2)
+            await session.commit()
+
+    async def get_wl_traffic_last_closed_date(self) -> Optional[date]:
+        """Последний WL-день, закрытый accumulate (глобально для бота)."""
+        async with self.session_factory() as session:
+            stmt = select(WlTrafficMeta.last_closed_date).where(WlTrafficMeta.id == 1)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
+    async def set_wl_traffic_last_closed_date(self, day: date) -> None:
+        """Помечает WL-день как закрытый (идемпотентность accumulate)."""
+        async with self.session_factory() as session:
+            stmt = select(WlTrafficMeta).where(WlTrafficMeta.id == 1)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            if row is None:
+                row = WlTrafficMeta(id=1, last_closed_date=day)
+                session.add(row)
+            else:
+                row.last_closed_date = day
+            await session.commit()
+
+    async def get_wl_limits(self, user_id: int) -> tuple[float, float]:
+        """Возвращает (trafic_wl, limit_wl) в GB."""
+        async with self.session_factory() as session:
+            stmt = select(Users.trafic_wl, Users.limit_wl).where(Users.user_id == user_id)
+            result = await session.execute(stmt)
+            row = result.one_or_none()
+            if row is None:
+                return 0.0, 0.0
+            return float(row[0] or 0.0), float(row[1] or 0.0)
+
+    async def select_users_active_subscription(
+        self,
+    ) -> List[Tuple[int, float, float, bool, Optional[datetime]]]:
+        """Активная PRO-подписка: (user_id, trafic_wl, limit_wl, field_bool_2, subscription_end_date)."""
+        async with self.session_factory() as session:
+            now = datetime.now()
+            stmt = select(
+                Users.user_id,
+                Users.trafic_wl,
+                Users.limit_wl,
+                Users.field_bool_2,
+                Users.subscription_end_date,
+            ).where(
+                Users.is_delete == False,
+                Users.in_panel == True,
+                Users.subscription_end_date.isnot(None),
+                Users.subscription_end_date > now,
+            )
+            result = await session.execute(stmt)
+            return [
+                (
+                    int(r[0]),
+                    float(r[1] or 0.0),
+                    float(r[2] or 0.0),
+                    bool(r[3]),
+                    r[4],
+                )
+                for r in result.all()
+            ]
+
+    async def select_forever_active_users(self) -> List[int]:
+        """Активные пользователи тарифа Навсегда (end_date >= 2030-01-01 и ещё не истекла)."""
+        from wl_traffic.constants import FOREVER_END_CUTOFF
+
+        async with self.session_factory() as session:
+            now = datetime.now()
+            stmt = select(Users.user_id).where(
+                Users.is_delete == False,
+                Users.in_panel == True,
+                Users.subscription_end_date.isnot(None),
+                Users.subscription_end_date > now,
+                Users.subscription_end_date >= FOREVER_END_CUTOFF,
+            )
+            result = await session.execute(stmt)
+            return [int(r[0]) for r in result.all()]
+
+    async def get_user_id_by_field_str_2(self, value: str) -> Optional[int]:
+        """user_id по field_str_2 (например gift_N)."""
+        if not value:
+            return None
+        async with self.session_factory() as session:
+            stmt = select(Users.user_id).where(Users.field_str_2 == value).limit(1)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            return int(row) if row is not None else None
+
+    async def add_wl_limit_subscribers_from_today(self, gb: float) -> list[int]:
+        """
+        +gb к limit_wl всем, у кого подписка до конца сегодня или позже (МСК).
+        field_bool_2 сбрасывается через add_wl_limit.
+        Возвращает список user_id.
+        """
+        from wl_traffic.constants import WL_TIMEZONE
+
+        if gb <= 0:
+            return []
+        today_start = (
+            datetime.now(WL_TIMEZONE)
+            .replace(hour=0, minute=0, second=0, microsecond=0)
+            .replace(tzinfo=None)
+        )
+        async with self.session_factory() as session:
+            stmt = select(Users.user_id).where(
+                Users.subscription_end_date.isnot(None),
+                Users.subscription_end_date >= today_start,
+            )
+            result = await session.execute(stmt)
+            user_ids = [int(r[0]) for r in result.all()]
+
+        for user_id in user_ids:
+            await self.add_wl_limit(user_id, gb)
+        return user_ids
+
     async def update_field_bool_3(self, user_id: int, value: bool):
         async with self.session_factory() as session:
             stmt = update(Users).where(Users.user_id == user_id).values(field_bool_3=value)
@@ -1247,6 +1429,48 @@ class AsyncSQL:
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]
 
+    _FOREVER_PAYMENT_AMOUNTS = (3490, 4990, 2790)
+
+    @staticmethod
+    def _forever_payment_cond(table):
+        """Платёж за тариф «Навсегда» (duration:5000 / 5000sale или типичные суммы)."""
+        return or_(
+            table.payload.like("%duration:5000%"),
+            table.amount.in_(AsyncSQL._FOREVER_PAYMENT_AMOUNTS),
+        )
+
+    def _forever_payers_subquery(self):
+        """user_id, хотя бы раз оплативших тариф «Навсегда»."""
+        fc = self._forever_payment_cond
+        return (
+            select(Payments.user_id)
+            .where(Payments.status == "confirmed", fc(Payments))
+            .union(
+                select(PaymentsStars.user_id).where(
+                    PaymentsStars.status == "confirmed", fc(PaymentsStars)
+                ),
+                select(PaymentsCryptobot.user_id).where(
+                    PaymentsCryptobot.status == "paid", fc(PaymentsCryptobot)
+                ),
+                select(PaymentsCards.user_id).where(
+                    PaymentsCards.status == "confirmed", fc(PaymentsCards)
+                ),
+                select(PaymentsPlategaCrypto.user_id).where(
+                    PaymentsPlategaCrypto.status == "confirmed", fc(PaymentsPlategaCrypto)
+                ),
+                select(PaymentsWataSBP.user_id).where(
+                    PaymentsWataSBP.status == "confirmed", fc(PaymentsWataSBP)
+                ),
+                select(PaymentsWataCard.user_id).where(
+                    PaymentsWataCard.status == "confirmed", fc(PaymentsWataCard)
+                ),
+                select(PaymentsFkSBP.user_id).where(
+                    PaymentsFkSBP.status == "confirmed", fc(PaymentsFkSBP)
+                ),
+            )
+            .subquery()
+        )
+
     def _build_broadcast_where(self, category: str, exclude_today: bool):
         """
         Условие выборки пользователей для рассылки.
@@ -1342,6 +1566,20 @@ class AsyncSQL:
                     Users.in_panel == True,
                     Users.subscription_end_date != None,
                     Users.is_delete == False,
+                )
+            )
+        if category == "never_bought_forever":
+            from wl_traffic.constants import FOREVER_END_CUTOFF
+
+            forever_paid = self._forever_payers_subquery()
+            return wrap(
+                and_(
+                    Users.is_delete == False,
+                    Users.user_id.notin_(forever_paid),
+                    or_(
+                        Users.subscription_end_date.is_(None),
+                        Users.subscription_end_date < FOREVER_END_CUTOFF,
+                    ),
                 )
             )
         return None

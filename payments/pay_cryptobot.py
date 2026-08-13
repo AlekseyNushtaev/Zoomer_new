@@ -10,7 +10,7 @@ from lexicon import lexicon, dct_price, dct_desc
 from logging_config import logger
 from payments.payment_limits import payment_creation_allowed
 from payments.payload_source import BOT
-from payments.tariff_gate import is_mobile_tariff_key
+from payments.tariff_gate import is_mobile_tariff_key, normalize_tariff_duration_key
 
 router: Router = Router()
 
@@ -167,10 +167,8 @@ async def process_payment_crypto(callback: CallbackQuery):
     if 'white' in duration_key:
         white_flag = True
         duration = duration_key.replace('white_', '')
-    elif 'old' in duration_key:
-        duration = duration_key.replace('old', '')
     else:
-        duration = duration_key
+        duration = normalize_tariff_duration_key(duration_key)
 
     if callback.from_user.id in ADMIN_IDS:
         rub_amount = 1
@@ -192,7 +190,7 @@ async def process_payment_crypto(callback: CallbackQuery):
     )
 
     if result['status'] == 'pending':
-        text = lexicon['payment_link_white'] if white_flag else lexicon['payment_link']
+        text = lexicon['payment_link_white'] if white_flag else lexicon['payment_link'].format(wl_bonus="")
         if gift_flag:
             text += '\n\nДля оплаты <b>подарочной подписки</b> перейдите по ссылке:'
         else:

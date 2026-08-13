@@ -58,6 +58,7 @@ CATEGORY_LABELS = {
     "not_subscribed": "без подписки в панели",
     "connected_never_paid": "подключены, никогда не платили",
     "subscribed_all": "есть подписка в панели",
+    "never_bought_forever": "не покупали тариф Навсегда",
     "all_users": "все пользователи",
 }
 
@@ -78,7 +79,10 @@ CUSTOM_PRESETS = [
     ("r_120", "🔥 Акция: 120 дней — 749 руб", STYLE_SUCCESS),
     ("r_180", "🏆 180 дней — 1349 руб (выгода −25%)", STYLE_SUCCESS),
     ("r_365", "💎 365 дней — 2399 руб (выгода −33%)", STYLE_SUCCESS),
-    ("r_5000", "♾️ Навсегда — 3490 руб", STYLE_SUCCESS),
+    ("r_5000", "♾️ Навсегда — 4990 руб", STYLE_SUCCESS),
+    ("r_5000sale_get", '⭐️ Получить "Навсегда" за 2790 ₽', STYLE_PRIMARY),
+    ("r_5000sale_take", '🎁 Забрать "Навсегда" за 2790 ₽', STYLE_PRIMARY),
+    ("r_5000sale_hurry", '⚡️ Успеть оформить за 2790 ₽', STYLE_PRIMARY),
     # ("r_white_30", "🦾 Включи мобильный интернет - 399 руб", STYLE_PRIMARY),
     ("r_30secret", "🔒 СЕКРЕТНЫЙ ТАРИФ", STYLE_DANGER),
 ]

@@ -9,7 +9,14 @@ from config import ADMIN_IDS, CHECKER_ID
 from telegram_ids import is_telegram_chat_id
 from config_bd.models import Users
 from X3 import panel_username_for_site_user
-from keyboard import create_kb, STYLE_SUCCESS, STYLE_PRIMARY, STYLE_DANGER, keyboard_sub_after_buy
+from keyboard import (
+    BTN_BACK,
+    create_kb,
+    STYLE_SUCCESS,
+    STYLE_PRIMARY,
+    STYLE_DANGER,
+    keyboard_sub_after_buy,
+)
 from lexicon import lexicon
 from logging_config import logger
 import asyncio
@@ -18,6 +25,17 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.filters import Command
 
 from sheduler.check_connect import check_connect
+from wl_traffic.service import (
+    fetch_panel_user,
+    fetch_wl_traffic_gb_for_day,
+    get_wl_used_gb_for_user,
+    reassign_to_active_squad,
+    user_on_active_squad,
+    user_on_limited_squad,
+)
+
+_ADD_TRAFFIC_ALL_PROGRESS_EVERY = 100
+_USER_TUPLE_FIELD_BOOL_2 = 25
 
 _ADD_7_MAY_GIFT_HTML = (
     "🎁 <b>Сюрприз от Zoomer VPN</b>\n\n"
@@ -265,12 +283,20 @@ async def pay_info_command(message: Message):
         ts = _pay_dt_str(tc)
         pay_lines.append(f"• {ts} — {kind} — {days_s} дн.")
 
+    trafic_wl, limit_wl = await sql.get_wl_limits(target_id)
+    used_wl_gb = await get_wl_used_gb_for_user(x3, target_id, trafic_wl, sql=sql)
+    remaining_wl = max(0.0, round(limit_wl - used_wl_gb, 2))
+
     body = (
         f"<b>/pay {target_id}</b>\n\n"
         f"Подписка обычная в БД бота — {_pay_dt_str(sub_db)}\n"
         f"Подписка обычная в панели — {_pay_panel_sub_line(ar_reg)}\n"
         f"Подписка вайт в БД бота — {_pay_dt_str(white_db)}\n"
         f"Подписка вайт в панели — {_pay_panel_sub_line(ar_white)}\n\n"
+        f"📡 <b>Антиглушилка (WL-трафик)</b>\n"
+        f"├ Лимит: <b>{limit_wl:.2f} GB</b>\n"
+        f"├ Использовано: <b>{used_wl_gb:.2f} GB</b>\n"
+        f"└ Осталось: <b>{remaining_wl:.2f} GB</b>\n\n"
         f"<b>Платежи:</b>\n"
     )
     if pay_lines:
@@ -279,7 +305,7 @@ async def pay_info_command(message: Message):
         body += "Нет"
 
     for chunk in _split_long_text(body):
-        await message.answer(chunk)
+        await message.answer(chunk, parse_mode="HTML")
 
 
 async def _partner_admin_stats_text(tg_id: int) -> Optional[str]:
@@ -1257,6 +1283,217 @@ async def check_users_command(message: Message):
         return
     await sql.update_delete_all(False)
     await message.answer('Все юзеры разблокированы')
+
+
+@router.message(Command(commands=['add_traffic']))
+async def add_traffic_command(message: Message):
+    """Админ: добавить GB к limit_wl, при необходимости вернуть на active squad."""
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    args = (message.text or "").split()
+    if len(args) < 3:
+        await message.answer(
+            "❌ Использование: /add_traffic <telegram_id> <GB>\n"
+            "Например: /add_traffic 123456789 10"
+        )
+        return
+
+    try:
+        target_id = int(args[1].strip())
+        gb = float(args[2].strip().replace(",", "."))
+    except ValueError:
+        await message.answer("❌ ID и количество GB должны быть числами.")
+        return
+
+    if gb <= 0:
+        await message.answer("❌ Количество GB должно быть больше 0.")
+        return
+
+    user_row = await sql.get_user(target_id)
+    if not user_row:
+        await message.answer(f"❌ Пользователь {target_id} не найден в базе данных.")
+        return
+
+    trafic_wl, _ = await sql.get_wl_limits(target_id)
+    used_gb = await get_wl_used_gb_for_user(x3, target_id, trafic_wl, sql=sql)
+
+    await sql.add_wl_limit(target_id, gb)
+    _, limit_wl = await sql.get_wl_limits(target_id)
+    remaining_gb = max(0.0, round(limit_wl - used_gb, 2))
+
+    panel_user = await fetch_panel_user(x3, target_id, sql=sql)
+    squad_note = ""
+    if panel_user:
+        user_row_after = await sql.get_user(target_id)
+        field_bool_2 = (
+            bool(user_row_after[_USER_TUPLE_FIELD_BOOL_2]) if user_row_after else False
+        )
+        if (
+            user_on_limited_squad(panel_user)
+            and limit_wl > used_gb
+            and not field_bool_2
+        ):
+            if await reassign_to_active_squad(x3, panel_user):
+                squad_note = "\n✅ Squad → active (Антиглушилка)"
+            else:
+                squad_note = "\n⚠️ Не удалось переназначить squad в панели"
+
+    admin_text = (
+        f"✅ <b>Добавлено {gb:g} GB</b> для user <code>{target_id}</code>{squad_note}\n\n"
+        f"├ Использовано: <b>{used_gb:.2f} GB</b>\n"
+        f"└ Лимит: <b>{limit_wl:.2f} GB</b>"
+    )
+    await message.answer(admin_text, parse_mode="HTML")
+    logger.info(
+        f"Админ {message.from_user.id}: /add_traffic uid={target_id} +{gb:g} GB "
+        f"used={used_gb:.2f} limit={limit_wl:.2f}"
+    )
+
+    if target_id > 0:
+        try:
+            await bot.send_message(
+                chat_id=target_id,
+                text=lexicon["wl_traffic_admin_grant"].format(
+                    gb=gb,
+                    limit_gb=limit_wl,
+                    used_gb=used_gb,
+                    remaining_gb=remaining_gb,
+                ),
+                parse_mode="HTML",
+                reply_markup=create_kb(1, back_to_main=BTN_BACK),
+            )
+        except Exception as e:
+            await message.answer(f"⚠️ Лимит добавлен, но push пользователю не отправлен: {e}")
+            logger.error(f"/add_traffic: push uid={target_id}: {e}")
+
+
+@router.message(Command(commands=['add_traffic_all']))
+async def add_traffic_all_command(message: Message):
+    """+10 GB limit_wl всем с подпиской до конца сегодня или позже (МСК)."""
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    from wl_traffic.constants import WL_GB_PER_MONTH
+
+    gb = float(WL_GB_PER_MONTH)
+    args = (message.text or "").split()
+    if len(args) >= 2:
+        try:
+            gb = float(args[1].strip().replace(",", "."))
+        except ValueError:
+            await message.answer(
+                "❌ Использование: /add_traffic_all [GB]\n"
+                "По умолчанию 10 GB. Пример: /add_traffic_all 10"
+            )
+            return
+
+    if gb <= 0:
+        await message.answer("❌ Количество GB должно быть больше 0.")
+        return
+
+    user_ids = await sql.add_wl_limit_subscribers_from_today(gb)
+    total = len(user_ids)
+    if not user_ids:
+        await message.answer(
+            "Нет пользователей с подпиской до конца сегодня или позже (МСК)."
+        )
+        return
+
+    await message.answer(
+        f"⏳ /add_traffic_all: +{gb:g} GB для {total} пользователей, "
+        f"отправка push и проверка squad…"
+    )
+
+    traffic_by_username, traffic_by_uuid = await fetch_wl_traffic_gb_for_day(
+        x3, retries=1,
+    )
+
+    admin_chat_id = message.chat.id
+    pushed = 0
+    squad_moved = 0
+    push_failed = 0
+    squad_failed = 0
+    skipped_non_tg = 0
+
+    for processed, target_id in enumerate(user_ids, start=1):
+        if processed % _ADD_TRAFFIC_ALL_PROGRESS_EVERY == 0:
+            try:
+                await bot.send_message(
+                    admin_chat_id,
+                    f"add_traffic_all: {processed} / {total}, "
+                    f"push {pushed}, squad → active {squad_moved}",
+                )
+            except Exception as notify_err:
+                logger.warning(
+                    "add_traffic_all: не удалось отправить прогресс админу: %s",
+                    notify_err,
+                )
+
+        trafic_wl, limit_wl = await sql.get_wl_limits(target_id)
+        used_gb = await get_wl_used_gb_for_user(
+            x3,
+            target_id,
+            trafic_wl,
+            traffic_by_username=traffic_by_username,
+            traffic_by_uuid=traffic_by_uuid,
+            sql=sql,
+        )
+        remaining_gb = max(0.0, round(limit_wl - used_gb, 2))
+
+        panel_user = await fetch_panel_user(x3, target_id, sql=sql)
+        if (
+            panel_user
+            and not user_on_active_squad(panel_user)
+            and limit_wl > used_gb
+        ):
+            if await reassign_to_active_squad(x3, panel_user):
+                squad_moved += 1
+            else:
+                squad_failed += 1
+
+        if target_id <= 0 or not is_telegram_chat_id(target_id):
+            skipped_non_tg += 1
+            await asyncio.sleep(0.05)
+            continue
+
+        try:
+            await bot.send_message(
+                chat_id=target_id,
+                text=lexicon["wl_traffic_admin_grant"].format(
+                    gb=gb,
+                    limit_gb=limit_wl,
+                    used_gb=used_gb,
+                    remaining_gb=remaining_gb,
+                ),
+                parse_mode="HTML",
+                reply_markup=create_kb(1, back_to_main=BTN_BACK),
+            )
+            pushed += 1
+        except Exception as e:
+            push_failed += 1
+            logger.warning(
+                "add_traffic_all: push uid=%s: %s",
+                target_id,
+                e,
+            )
+
+        await asyncio.sleep(0.05)
+
+    await message.answer(
+        f"✅ <b>Готово (/add_traffic_all)</b>\n\n"
+        f"• +{gb:g} GB limit_wl: <b>{total}</b> пользователей\n"
+        f"• Push отправлено: <b>{pushed}</b>\n"
+        f"• Squad → active (белая нода): <b>{squad_moved}</b>\n"
+        f"• Ошибка push: {push_failed}\n"
+        f"• Ошибка squad: {squad_failed}\n"
+        f"• Пропущено (не Telegram chat_id): {skipped_non_tg}",
+        parse_mode="HTML",
+    )
+    logger.info(
+        f"Админ {message.from_user.id}: /add_traffic_all +{gb:g} GB, "
+        f"total={total} pushed={pushed} squad_moved={squad_moved}"
+    )
 
 
 @router.message(Command(commands=['reset_bool3']))

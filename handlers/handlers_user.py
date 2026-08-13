@@ -26,6 +26,8 @@ from aiogram.types import (
 )
 from aiogram.filters import BaseFilter, ChatMemberUpdatedFilter, KICKED, MEMBER, Command
 from lexicon import lexicon
+from wl_traffic.service import credit_wl_subscription_bonus
+from wl_traffic.texts import format_pro_payment_link
 
 
 router: Router = Router()
@@ -343,6 +345,7 @@ async def trial_return_get_cb(callback: CallbackQuery):
 
     await sql.update_in_panel(uid)
     await sql.update_field_bool_3(uid, True)
+    await sql.init_wl_trial_limits(uid)
     await post_user_trial(uid)
     await callback.message.answer(
         "🎉 Поздравляем! Вы получили 7 триальных дней доступа к ВПН! ✨🔐",
@@ -374,12 +377,31 @@ async def secret_tariff_payment(callback: CallbackQuery):
     )
 
 
-@router.callback_query(F.data.in_({'r_7', 'r_30', 'r_90', 'r_180', 'r_365', 'r_5000'}))
+_FOREVER_SALE_CALLBACKS = frozenset({
+    "r_5000sale_get",
+    "r_5000sale_take",
+    "r_5000sale_hurry",
+})
+
+
+@router.callback_query(F.data.in_(_FOREVER_SALE_CALLBACKS))
+async def forever_sale_tariff_payment(callback: CallbackQuery):
+    await callback.answer()
+    text = format_pro_payment_link(5000)
+    text += "\n\nВыберите способ оплаты:"
+    await callback.message.answer(
+        text,
+        reply_markup=keyboard_payment_method("r_5000sale"),
+    )
+
+
+@router.callback_query(F.data.in_({'r_7', 'r_30', 'r_90', 'r_180', 'r_365', 'r_5000', 'r_120'}))
 async def process_payment_method(callback: CallbackQuery):
     await callback.answer()
-    text = lexicon['payment_link']
-    text += '\n\nВыберите способ оплаты:'
     tariff = callback.data
+    duration = int(tariff.replace('r_', ''))
+    text = format_pro_payment_link(duration)
+    text += '\n\nВыберите способ оплаты:'
     await callback.message.answer(text, reply_markup=keyboard_payment_method(tariff))
 
 
@@ -411,6 +433,7 @@ async def free_vpn_cb(callback: CallbackQuery):
         await sql.update_in_panel(callback.from_user.id)
     else:
         await sql.add_user(callback.from_user.id, True)
+    await sql.init_wl_trial_limits(callback.from_user.id)
     user_id = str(callback.from_user.id)
     sub_url = await x3.sublink(user_id)
 
@@ -535,8 +558,9 @@ async def process_gift_payment_method(callback: CallbackQuery):
         await callback.answer(lexicon['mobile_purchase_disabled'], show_alert=True)
         return
     await callback.answer()
-    text = lexicon['payment_link']
     tariff = callback.data
+    duration = int(tariff.replace('gift_r_', ''))
+    text = format_pro_payment_link(duration)
     text += '\n\nВыберите способ оплаты <b>подарочной подписки</b>:'
     await callback.message.answer(text, reply_markup=keyboard_payment_method(tariff))
 
@@ -587,6 +611,12 @@ async def activate_gift(message: Message, gift_id: str):
 
         # Обновляем базу данных
         await sql.update_in_panel(message.from_user.id)
+        if not white_flag:
+            await credit_wl_subscription_bonus(sql, message.from_user.id, int(duration))
+            from wl_traffic.service import fetch_panel_user, reassign_to_active_squad, user_on_limited_squad
+            panel_user = await fetch_panel_user(x3, message.from_user.id, sql=sql)
+            if panel_user and user_on_limited_squad(panel_user):
+                await reassign_to_active_squad(x3, panel_user)
         if was_in_db:
             logger.info(
                 f'Юзер {message.from_user.id} - {message.from_user.username} получил в подарок подписку, уже был в БД')
