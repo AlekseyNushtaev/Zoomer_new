@@ -35,6 +35,8 @@ from utils.token_crypto import decrypt_token
 
 router = Router()
 partner_sql = PartnerAppSQL()
+_update_all_lock = asyncio.Lock()
+_update_all_running = False
 
 
 class PartnerApplyFSM(StatesGroup):
@@ -319,6 +321,106 @@ def _format_app(app) -> str:
     )
 
 
+async def _redeploy_partner_bot(app_id: int, *, notify_partner: bool = False) -> None:
+    """Повторный деплой бота на VPS (без stop)."""
+    app = await partner_sql.get_by_id(app_id)
+    if not app:
+        raise ValueError(f"заявка #{app_id} не найдена")
+
+    token = decrypt_token(app.bot_token_encrypted)
+    deploy_result = await deploy_bot(
+        app_id,
+        token,
+        app.partner_tg_id,
+        app.bot_username,
+        source_bot_id=getattr(app, "source_bot_id", None),
+        partner_username=getattr(app, "partner_username", None),
+        bot_display_name=getattr(app, "bot_display_name", None),
+    )
+    vps_status = await wait_bot_running(app_id, deploy_result)
+    await partner_sql.update_status(
+        app_id,
+        "active",
+        instance_id=deploy_result.get("instance_id") or vps_status.get("instance_id"),
+        deployed_at=datetime.now(),
+    )
+    if notify_partner:
+        await notify_partner_user(
+            app.partner_tg_id,
+            f"▶️ Бот @{app.bot_username} обновлён и снова запущен.",
+            source_bot_id=getattr(app, "source_bot_id", None),
+        )
+
+
+async def _update_single_active_bot(app) -> None:
+    """Останавливает и повторно деплоит один активный бот."""
+    await stop_bot(app.id)
+    await partner_sql.update_status(app.id, "deploying")
+    try:
+        await _redeploy_partner_bot(app.id, notify_partner=False)
+    except Exception:
+        await partner_sql.update_status(app.id, "stopped")
+        raise
+
+
+async def _run_update_all_bots(admin_id: int, apps: list) -> None:
+    total = len(apps)
+    ok = 0
+    fail = 0
+    logger.info("update_all_bots started: admin_id={} count={}", admin_id, total)
+    try:
+        for index, app in enumerate(apps, start=1):
+            progress_text = (
+                f"⏳ <b>[{index}/{total}]</b> Обновляю "
+                f"#{app.id} @{app.bot_username}…"
+            )
+            try:
+                await bot.send_message(admin_id, progress_text)
+            except Exception as e:
+                logger.error("update_all_bots progress notify failed: {}", e)
+
+            try:
+                await _update_single_active_bot(app)
+                ok += 1
+                result_text = f"✅ #{app.id} @{app.bot_username} — обновлён"
+                logger.info(
+                    "update_all_bots ok: app_id={} bot=@{}",
+                    app.id,
+                    app.bot_username,
+                )
+            except Exception as e:
+                fail += 1
+                result_text = f"❌ #{app.id} @{app.bot_username} — ошибка: {e}"
+                logger.exception(
+                    "update_all_bots failed: app_id={} bot=@{}",
+                    app.id,
+                    app.bot_username,
+                )
+
+            try:
+                await bot.send_message(admin_id, result_text)
+            except Exception as e:
+                logger.error("update_all_bots result notify failed: {}", e)
+    finally:
+        summary = (
+            f"🏁 <b>Массовое обновление завершено</b>\n\n"
+            f"Всего: {total}\n"
+            f"✅ Успешно: {ok}\n"
+            f"❌ Ошибок: {fail}"
+        )
+        try:
+            await bot.send_message(admin_id, summary)
+        except Exception as e:
+            logger.error("update_all_bots summary notify failed: {}", e)
+        logger.info(
+            "update_all_bots finished: admin_id={} total={} ok={} fail={}",
+            admin_id,
+            total,
+            ok,
+            fail,
+        )
+
+
 async def _run_partner_deploy(
     app_id: int,
     admin_id: int,
@@ -343,25 +445,8 @@ async def _run_partner_deploy(
         app.partner_tg_id,
     )
     try:
-        token = decrypt_token(app.bot_token_encrypted)
-        deploy_result = await deploy_bot(
-            app_id,
-            token,
-            app.partner_tg_id,
-            app.bot_username,
-            source_bot_id=getattr(app, "source_bot_id", None),
-            partner_username=getattr(app, "partner_username", None),
-            bot_display_name=getattr(app, "bot_display_name", None),
-        )
-        vps_status = await wait_bot_running(app_id, deploy_result)
-        logger.info("partner {} VPS confirmed: app_id={} vps_status={}", log_action, app_id, vps_status)
-
-        await partner_sql.update_status(
-            app_id,
-            "active",
-            instance_id=deploy_result.get("instance_id") or vps_status.get("instance_id"),
-            deployed_at=datetime.now(),
-        )
+        await _redeploy_partner_bot(app_id, notify_partner=False)
+        logger.info("partner {} VPS confirmed: app_id={}", log_action, app_id)
         updated = await partner_sql.get_by_id(app_id)
         if is_restart:
             partner_text = f"▶️ Бот @{app.bot_username} снова запущен."
@@ -562,6 +647,50 @@ async def admin_partner_command(message: Message):
         await message.answer("❌ Нет доступа.")
         return
     await message.answer("🛠 <b>Админка партнёрских ботов</b>", reply_markup=_admin_menu_kb())
+
+
+@router.message(Command("update_all_bots"))
+async def update_all_bots_command(message: Message):
+    global _update_all_running
+    if not _is_partner_admin(message.from_user.id):
+        await message.answer("❌ Нет доступа.")
+        return
+
+    if _update_all_running:
+        await message.answer(
+            "⏳ Массовое обновление уже выполняется. Дождитесь завершения.",
+        )
+        return
+
+    apps = await partner_sql.list_by_status("active")
+    if not apps:
+        await message.answer("ℹ️ Нет активных партнёрских ботов для обновления.")
+        return
+
+    lines = "\n".join(f"• #{app.id} @{app.bot_username}" for app in apps)
+    preview_text = (
+        f"🔄 <b>Массовое обновление активных ботов</b>\n\n"
+        f"Будет обновлено: <b>{len(apps)}</b>\n\n"
+        f"{lines}\n\n"
+        f"⏳ Обновление запущено в фоне. Прогресс будет приходить сюда."
+    )
+    if len(preview_text) > 4000:
+        preview_text = preview_text[:3990] + "\n…"
+
+    await message.answer(preview_text)
+
+    admin_id = message.from_user.id
+    _update_all_running = True
+
+    async def _run_locked() -> None:
+        global _update_all_running
+        try:
+            async with _update_all_lock:
+                await _run_update_all_bots(admin_id, apps)
+        finally:
+            _update_all_running = False
+
+    asyncio.create_task(_run_locked())
 
 
 @router.callback_query(F.data == "pa_menu")
