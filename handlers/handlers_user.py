@@ -377,25 +377,7 @@ async def secret_tariff_payment(callback: CallbackQuery):
     )
 
 
-_FOREVER_SALE_CALLBACKS = frozenset({
-    "r_5000sale_get",
-    "r_5000sale_take",
-    "r_5000sale_hurry",
-})
-
-
-@router.callback_query(F.data.in_(_FOREVER_SALE_CALLBACKS))
-async def forever_sale_tariff_payment(callback: CallbackQuery):
-    await callback.answer()
-    text = format_pro_payment_link(5000)
-    text += "\n\nВыберите способ оплаты:"
-    await callback.message.answer(
-        text,
-        reply_markup=keyboard_payment_method("r_5000sale"),
-    )
-
-
-@router.callback_query(F.data.in_({'r_7', 'r_30', 'r_90', 'r_180', 'r_365', 'r_5000', 'r_120'}))
+@router.callback_query(F.data.in_({'r_7', 'r_30', 'r_90', 'r_180', 'r_365', 'r_120'}))
 async def process_payment_method(callback: CallbackQuery):
     await callback.answer()
     tariff = callback.data
@@ -554,6 +536,9 @@ async def gift_subscription_start(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith('gift_'))
 async def process_gift_payment_method(callback: CallbackQuery):
+    if callback.data == 'gift_r_5000':
+        await callback.answer()
+        return
     if 'white' in callback.data:
         await callback.answer(lexicon['mobile_purchase_disabled'], show_alert=True)
         return

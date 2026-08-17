@@ -132,7 +132,6 @@ _STYLES_TARIFF = {
     "r_90": STYLE_SUCCESS,
     "r_180": STYLE_SUCCESS,
     "r_365": STYLE_SUCCESS,
-    "r_5000": STYLE_SUCCESS,
     "r_120": STYLE_SUCCESS,
     "r_30old": STYLE_PRIMARY,
     "free_vpn": STYLE_SUCCESS,
@@ -148,7 +147,6 @@ def keyboard_tariff_bonus():
         r_90='✅ 90 дней — 749 руб (выгода −17%)',
         r_180='🏆 180 дней — 1349 руб (выгода −25%)',
         r_365='💎 365 дней — 2399 руб (выгода −33%)',
-        r_5000='♾️ Навсегда — 4990 руб',
         free_vpn='🔥ПОПРОБОВАТЬ 1 день БЕСПЛАТНО🔥',
         wl_traffic_buy_sub='📦 Купить трафик Антиглушилка',
         back_to_main='🔙 Назад',
@@ -167,7 +165,6 @@ def keyboard_tariff():
         r_90='✅ 90 дней — 749 руб (выгода −17%)',
         r_180='🏆 180 дней — 1349 руб (выгода −25%)',
         r_365='💎 365 дней — 2399 руб (выгода −33%)',
-        r_5000='♾️ Навсегда — 4990 руб',
         wl_traffic_buy_sub='📦 Купить трафик Антиглушилка',
         back_to_main='🔙 Назад',
     )
@@ -186,7 +183,6 @@ def keyboard_tariff_trial():
         r_120='🔥 Акция: 120 дней — 749 руб',
         r_180='🏆 180 дней — 1349 руб (выгода −25%)',
         r_365='💎 365 дней — 2399 руб (выгода −33%)',
-        r_5000='♾️ Навсегда — 4990 руб',
         wl_traffic_buy_sub='📦 Купить трафик Антиглушилка',
         back_to_main='🔙 Назад',
     )
@@ -215,7 +211,6 @@ _STYLES_GIFT = {
     "gift_r_90": STYLE_SUCCESS,
     "gift_r_180": STYLE_SUCCESS,
     "gift_r_365": STYLE_SUCCESS,
-    "gift_r_5000": STYLE_SUCCESS,
 }
 
 
@@ -228,7 +223,6 @@ def keyboard_gift_tariff():
         gift_r_90='✅ 90 дней — 749 руб (выгода −17%)',
         gift_r_180='🏆 180 дней — 1349 руб (выгода −25%)',
         gift_r_365='💎 365 дней — 2399 руб (выгода −33%)',
-        gift_r_5000='♾️ Навсегда — 4990 руб',
         back_to_main='🔙 Назад',
     )
 
@@ -707,14 +701,12 @@ def keyboard_discount_push_tariffs() -> InlineKeyboardMarkup:
             "dpush_tariff_90": STYLE_SUCCESS,
             "dpush_tariff_180": STYLE_SUCCESS,
             "dpush_tariff_365": STYLE_SUCCESS,
-            "dpush_tariff_5000": STYLE_SUCCESS,
         },
         dpush_tariff_7=f'👌 7 дней — {p["7"]} руб',
         dpush_tariff_30=f'🤝 30 дней — {p["30"]} руб',
         dpush_tariff_90=f'✅ 90 дней — {p["90"]} руб (выгода −17%)',
         dpush_tariff_180=f'🏆 180 дней — {p["180"]} руб (выгода −25%)',
         dpush_tariff_365=f'💎 365 дней — {p["365"]} руб (выгода −33%)',
-        dpush_tariff_5000=f'♾️ Навсегда — {p["5000"]} руб',
     )
 
 
