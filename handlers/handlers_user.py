@@ -8,7 +8,8 @@ from keyboard import (keyboard_start, keyboard_start_bonus, keyboard_tariff_bonu
                       keyboard_subscription, keyboard_sub_after_free, ref_keyboard, keyboard_gift_tariff,
                       keyboard_payment_method, keyboard_payment_method_stock, chanel_keyboard, create_kb,
                       keyboard_inline_ref, keyboard_partner_intro, keyboard_partner_dashboard,
-                      keyboard_partner_withdraw, STYLE_PRIMARY, OPEN_SITE_CB, SITE_URL)
+                      keyboard_partner_withdraw, keyboard_buy_menu, keyboard_earn_with_us,
+                      STYLE_PRIMARY, OPEN_SITE_CB, SITE_URL)
 from web_api import create_bot_site_login_token
 from logging_config import logger
 import asyncio
@@ -275,6 +276,16 @@ async def open_site_callback(callback: CallbackQuery):
 @router.callback_query(F.data == 'buy_vpn')
 async def buy_vpn_cb(callback: CallbackQuery):
     await callback.answer()
+    await callback.message.answer(
+        text=lexicon['buy_menu'],
+        reply_markup=keyboard_buy_menu(),
+        disable_web_page_preview=True,
+    )
+
+
+@router.callback_query(F.data == 'buy_vpn_self')
+async def buy_vpn_self_cb(callback: CallbackQuery):
+    await callback.answer()
     user_data = await sql.get_user(callback.from_user.id)
     in_panel = False
 
@@ -426,6 +437,26 @@ async def free_vpn_cb(callback: CallbackQuery):
     await callback.message.answer(lexicon['to_chanel'], reply_markup=chanel_keyboard())
     await post_user_trial(callback.from_user.id)
     await callback.answer()
+
+
+@router.callback_query(F.data == 'earn_with_us')
+async def earn_with_us_cb(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer(
+        text=lexicon['earn_menu'],
+        reply_markup=keyboard_earn_with_us(),
+        disable_web_page_preview=True,
+    )
+
+
+@router.callback_query(F.data == 'back_to_earn')
+async def back_to_earn_cb(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer(
+        text=lexicon['earn_menu'],
+        reply_markup=keyboard_earn_with_us(),
+        disable_web_page_preview=True,
+    )
 
 
 @router.callback_query(F.data == 'ref')
@@ -628,9 +659,14 @@ async def video_faq(callback: CallbackQuery):
 
 
 @router.callback_query(F.data == 'back_to_buy_menu')
-async def handle_back_to_menu(callback: CallbackQuery):
-    """Обработчик для возврата в главное меню из оплаты"""
-    await callback.message.answer(text=lexicon['buy'], reply_markup=keyboard_tariff())
+async def handle_back_to_buy_menu(callback: CallbackQuery):
+    """Возврат в меню покупки подписки."""
+    await callback.answer()
+    await callback.message.answer(
+        text=lexicon['buy_menu'],
+        reply_markup=keyboard_buy_menu(),
+        disable_web_page_preview=True,
+    )
 
 
 @router.callback_query(F.data == 'back_to_main')
@@ -642,8 +678,8 @@ async def handle_back_to_menu(callback: CallbackQuery):
 
 
 @router.callback_query(F.data == 'back_to_gift_menu')
-async def handle_back_to_menu(callback: CallbackQuery):
-    """Обработчик для возврата в главное меню из оплаты"""
+async def handle_back_to_gift_menu(callback: CallbackQuery):
+    """Обработчик для возврата в меню подарка подписки."""
     await callback.message.edit_text(text=lexicon['gift_start'], reply_markup=keyboard_gift_tariff())
 
 

@@ -84,16 +84,12 @@ def keyboard_start(user_id: Optional[int] = None):
             "buy_vpn": STYLE_SUCCESS,
             "connect_vpn": STYLE_PRIMARY,
             "user_profile": STYLE_PRIMARY,
-            "manage_devices": STYLE_PRIMARY,
-            "ref": STYLE_PRIMARY,
-            "buy_gift": STYLE_SUCCESS,
+            "earn_with_us": STYLE_SUCCESS,
         },
         buy_vpn='💰 Купить подписку',
         connect_vpn='🔗 Подключить VPN',
         user_profile='👤 Профиль',
-        manage_devices='📱 Управление устройствами',
-        ref='👭 Бесплатный VPN за приглашения',
-        buy_gift='🎁 Подарить подписку',
+        earn_with_us='💸 Зарабатывай с нами',
     )
     rows = list(markup.inline_keyboard)
     rows.append(
@@ -105,25 +101,37 @@ def keyboard_start(user_id: Optional[int] = None):
             )
         ]
     )
-    rows.append(
-        [
-            InlineKeyboardButton(
-                text="🤖 Создать своего VPN-бота",
-                callback_data="create_partner_bot",
-                style=STYLE_PRIMARY,
-            )
-        ]
-    )
-    rows.append(
-        [
-            InlineKeyboardButton(
-                text="💸 Зарабатывай с нами",
-                callback_data="partner_earn",
-                style=STYLE_SUCCESS,
-            )
-        ]
-    )
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def keyboard_buy_menu() -> InlineKeyboardMarkup:
+    return create_kb(
+        1,
+        styles={
+            "buy_vpn_self": STYLE_SUCCESS,
+            "buy_gift": STYLE_SUCCESS,
+            "back_to_main": STYLE_PRIMARY,
+        },
+        buy_vpn_self='💰 Купить подписку',
+        buy_gift='🎁 Подарить подписку',
+        back_to_main=BTN_BACK,
+    )
+
+
+def keyboard_earn_with_us() -> InlineKeyboardMarkup:
+    return create_kb(
+        1,
+        styles={
+            "ref": STYLE_PRIMARY,
+            "partner_earn": STYLE_SUCCESS,
+            "create_partner_bot": STYLE_PRIMARY,
+            "back_to_main": STYLE_PRIMARY,
+        },
+        ref='👭 Бесплатный VPN за приглашения',
+        partner_earn='🔗 Партнерская ссылка',
+        create_partner_bot='🤖 Хочу своего бота',
+        back_to_main=BTN_BACK,
+    )
 
 
 _STYLES_TARIFF = {
@@ -149,7 +157,7 @@ def keyboard_tariff_bonus():
         r_365='💎 365 дней — 2399 руб (выгода −33%)',
         free_vpn='🔥ПОПРОБОВАТЬ 1 день БЕСПЛАТНО🔥',
         wl_traffic_buy_sub='📦 Купить трафик Антиглушилка',
-        back_to_main='🔙 Назад',
+        back_to_buy_menu='🔙 Назад',
     )
 
 
@@ -166,7 +174,7 @@ def keyboard_tariff():
         r_180='🏆 180 дней — 1349 руб (выгода −25%)',
         r_365='💎 365 дней — 2399 руб (выгода −33%)',
         wl_traffic_buy_sub='📦 Купить трафик Антиглушилка',
-        back_to_main='🔙 Назад',
+        back_to_buy_menu='🔙 Назад',
     )
 
 
@@ -184,7 +192,7 @@ def keyboard_tariff_trial():
         r_180='🏆 180 дней — 1349 руб (выгода −25%)',
         r_365='💎 365 дней — 2399 руб (выгода −33%)',
         wl_traffic_buy_sub='📦 Купить трафик Антиглушилка',
-        back_to_main='🔙 Назад',
+        back_to_buy_menu='🔙 Назад',
     )
 
 
@@ -223,7 +231,7 @@ def keyboard_gift_tariff():
         gift_r_90='✅ 90 дней — 749 руб (выгода −17%)',
         gift_r_180='🏆 180 дней — 1349 руб (выгода −25%)',
         gift_r_365='💎 365 дней — 2399 руб (выгода −33%)',
-        back_to_main='🔙 Назад',
+        back_to_buy_menu='🔙 Назад',
     )
 
 
@@ -569,7 +577,7 @@ def ref_keyboard(user_id):
                     style=STYLE_SUCCESS,
                 )
             ],
-            [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")],
+            [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_earn")],
         ]
     )
     return keyboard
@@ -592,10 +600,10 @@ def keyboard_partner_intro():
         1,
         styles={
             "partner_create_link": STYLE_SUCCESS,
-            "back_to_main": STYLE_PRIMARY,
+            "back_to_earn": STYLE_PRIMARY,
         },
         partner_create_link='🔗 Создать партнёрскую ссылку',
-        back_to_main='🔙 Назад',
+        back_to_earn=BTN_BACK,
     )
 
 
@@ -604,10 +612,10 @@ def keyboard_partner_dashboard():
         1,
         styles={
             "partner_withdraw": STYLE_SUCCESS,
-            "back_to_main": STYLE_PRIMARY,
+            "back_to_earn": STYLE_PRIMARY,
         },
         partner_withdraw='💰 Создать заявку на вывод',
-        back_to_main='🔙 Назад',
+        back_to_earn=BTN_BACK,
     )
 
 
@@ -624,7 +632,7 @@ def keyboard_devices_subscriptions(slots: list[tuple[str, str]]) -> InlineKeyboa
                 )
             ]
         )
-    buttons.append([InlineKeyboardButton(text=BTN_BACK, callback_data="dev_back_main")])
+    buttons.append([InlineKeyboardButton(text=BTN_BACK, callback_data="back_to_profile")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -772,9 +780,11 @@ def keyboard_profile() -> InlineKeyboardMarkup:
     return create_kb(
         1,
         styles={
+            "manage_devices": STYLE_PRIMARY,
             "wl_traffic_buy": STYLE_SUCCESS,
             "back_to_main": STYLE_PRIMARY,
         },
+        manage_devices="📱 Управление устройствами",
         wl_traffic_buy="📦 Купить трафик",
         back_to_main=BTN_BACK,
     )
@@ -789,7 +799,7 @@ def keyboard_wl_traffic_tariffs(*, back_callback: str = "back_to_main") -> Inlin
         "250": "250 GB — 629 ₽",
         "500": "500 GB — 1249 ₽",
     }
-    from_sub = back_callback == "buy_vpn"
+    from_sub = back_callback in ("buy_vpn", "buy_vpn_self")
     buttons = []
     for mb, label in labels.items():
         cb = f"wl_traffic_sub_{mb}" if from_sub else f"wl_traffic_{mb}"

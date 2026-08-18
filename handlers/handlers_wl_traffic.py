@@ -16,7 +16,6 @@ from keyboard import (
 )
 from lexicon import lexicon
 from wl_traffic.constants import (
-    BUY_VPN_CB,
     PROFILE_CB,
     WL_TRAFFIC_BUY_CB,
     WL_TRAFFIC_BUY_SUB_CB,
@@ -44,9 +43,7 @@ def _format_sub_end(user_data: tuple) -> str:
     return aware.strftime("%d.%m.%Y")
 
 
-@router.callback_query(F.data == PROFILE_CB)
-async def user_profile_cb(callback: CallbackQuery):
-    await callback.answer()
+async def _send_user_profile(callback: CallbackQuery) -> None:
     uid = callback.from_user.id
     user_data = await sql.get_user(uid)
     if not user_data:
@@ -57,9 +54,7 @@ async def user_profile_cb(callback: CallbackQuery):
         return
 
     used_gb, limit_gb = await sql.get_wl_limits(uid)
-
     used_gb = await get_wl_used_gb_for_user(x3, uid, used_gb, sql=sql)
-
     remaining_gb = max(0.0, round(limit_gb - used_gb, 2))
 
     await callback.message.answer(
@@ -74,9 +69,21 @@ async def user_profile_cb(callback: CallbackQuery):
     )
 
 
+@router.callback_query(F.data == PROFILE_CB)
+async def user_profile_cb(callback: CallbackQuery):
+    await callback.answer()
+    await _send_user_profile(callback)
+
+
+@router.callback_query(F.data == "back_to_profile")
+async def back_to_profile_cb(callback: CallbackQuery):
+    await callback.answer()
+    await _send_user_profile(callback)
+
+
 @router.callback_query(F.data.in_({WL_TRAFFIC_BUY_CB, WL_TRAFFIC_BUY_SUB_CB}))
 async def wl_traffic_buy_cb(callback: CallbackQuery):
-    back_callback = PROFILE_CB if callback.data == WL_TRAFFIC_BUY_CB else BUY_VPN_CB
+    back_callback = PROFILE_CB if callback.data == WL_TRAFFIC_BUY_CB else "buy_vpn_self"
     await callback.answer()
     await callback.message.answer(
         text="📦 Выберите пакет трафика для сервера <b>Антиглушилка</b>:",

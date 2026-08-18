@@ -12,7 +12,7 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 from bot import bot
 from config import ADMIN_PARTNER_IDS, BOT_URL
 from config_bd.partner_apps import PartnerAppSQL
-from keyboard import STYLE_PRIMARY, STYLE_SUCCESS, STYLE_DANGER, BTN_BACK, keyboard_start
+from keyboard import STYLE_PRIMARY, STYLE_SUCCESS, STYLE_DANGER, BTN_BACK, keyboard_earn_with_us
 from lexicon import lexicon
 from logging_config import logger
 from services.managed_bot_setup import strip_managed_bot_profile
@@ -90,7 +90,7 @@ def _partner_create_menu_kb() -> InlineKeyboardMarkup:
         )],
         [InlineKeyboardButton(
             text=BTN_BACK,
-            callback_data="partner_back_main",
+            callback_data="back_to_earn",
         )],
     ])
 
@@ -546,8 +546,8 @@ async def partner_back_main(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await _safe_edit_text(
         callback.message,
-        lexicon["start"],
-        reply_markup=keyboard_start(callback.from_user.id),
+        lexicon["earn_menu"],
+        reply_markup=keyboard_earn_with_us(),
     )
     await callback.answer()
 

@@ -13,9 +13,7 @@ from keyboard import (
     keyboard_devices_confirm,
     keyboard_devices_list,
     keyboard_devices_subscriptions,
-    keyboard_start,
 )
-from lexicon import lexicon
 from logging_config import logger
 
 router = Router()
@@ -180,16 +178,6 @@ async def manage_devices_entry(callback: CallbackQuery) -> None:
         reply_markup=keyboard_devices_subscriptions(
             [(slot_key, label) for slot_key, label, _uuid in slots]
         ),
-    )
-
-
-@router.callback_query(F.data == "dev_back_main")
-async def devices_back_to_main(callback: CallbackQuery) -> None:
-    await callback.answer()
-    await callback.message.edit_text(
-        text=lexicon["start"],
-        reply_markup=keyboard_start(callback.from_user.id),
-        disable_web_page_preview=True,
     )
 
 
