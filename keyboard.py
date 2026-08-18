@@ -112,7 +112,7 @@ def keyboard_buy_menu() -> InlineKeyboardMarkup:
             "buy_gift": STYLE_SUCCESS,
             "back_to_main": STYLE_PRIMARY,
         },
-        buy_vpn_self='💰 Купить подписку',
+        buy_vpn_self='👤 Для себя',
         buy_gift='🎁 Подарить подписку',
         back_to_main=BTN_BACK,
     )
