@@ -95,6 +95,44 @@ def _pick_fk_order_row(orders: List[dict], payment: PaymentsFkSBP) -> Optional[d
     return None
 
 
+async def fetch_fk_order_row(
+    payment: PaymentsFkSBP,
+    fk: FreekassaPayment,
+) -> tuple[Optional[dict], List[dict]]:
+    """Запрашивает заказ в FreeKassa API по payment_id, при необходимости — по order_id."""
+    payment_id = payment.transaction_id
+    if not payment_id:
+        return None, []
+
+    nonce = await sql.alloc_fk_api_nonce()
+    result = await fk.get_orders(nonce=nonce, payment_id=payment_id)
+    orders_list = result.get("orders") or []
+    row = _pick_fk_order_row(orders_list, payment)
+
+    if row is None and payment.fk_order_id is not None:
+        nonce2 = await sql.alloc_fk_api_nonce()
+        result = await fk.get_orders(nonce=nonce2, order_id=payment.fk_order_id)
+        orders_list = result.get("orders") or []
+        row = _pick_fk_order_row(orders_list, payment)
+
+    return row, orders_list
+
+
+async def fetch_fk_payment_check_status(
+    payment: PaymentsFkSBP,
+    fk: FreekassaPayment,
+) -> str:
+    """Проверяет статус платежа через FreeKassa API без изменений в БД."""
+    if not payment.transaction_id:
+        return "error"
+    try:
+        row, _ = await fetch_fk_order_row(payment, fk)
+        return _resolve_fk_status_after_api(payment, row) or "pending"
+    except Exception as e:
+        logger.error(f"FreeKassa check status {payment.transaction_id}: {e}")
+        return "error"
+
+
 async def check_fk_sbp():
     """Проверка заказов FreeKassa (API orders)."""
     if not API_FREEKASSA or SHOP_ID_FREEKASSA is None:
@@ -120,17 +158,7 @@ async def check_fk_sbp():
                 if not payment_id:
                     continue
 
-                nonce = await sql.alloc_fk_api_nonce()
-                result = await fk.get_orders(nonce=nonce, payment_id=payment_id)
-                orders_list = result.get("orders") or []
-                row = _pick_fk_order_row(orders_list, payment)
-
-                if row is None and payment.fk_order_id is not None:
-                    nonce2 = await sql.alloc_fk_api_nonce()
-                    result = await fk.get_orders(nonce=nonce2, order_id=payment.fk_order_id)
-                    orders_list = result.get("orders") or []
-                    row = _pick_fk_order_row(orders_list, payment)
-
+                row, orders_list = await fetch_fk_order_row(payment, fk)
                 new_status = _resolve_fk_status_after_api(payment, row)
 
                 if row is None:

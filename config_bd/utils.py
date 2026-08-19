@@ -1940,6 +1940,16 @@ class AsyncSQL:
             result = await session.execute(stmt)
             return result.scalars().all()
 
+    async def get_fk_sbp_payments_from_date(self, since: datetime) -> List[PaymentsFkSBP]:
+        async with self.session_factory() as session:
+            stmt = (
+                select(PaymentsFkSBP)
+                .where(PaymentsFkSBP.time_created >= since)
+                .order_by(PaymentsFkSBP.time_created)
+            )
+            result = await session.execute(stmt)
+            return result.scalars().all()
+
     async def update_fk_sbp_payment_status(self, transaction_id: str, new_status: str) -> None:
         async with self.session_factory() as session:
             stmt = update(PaymentsFkSBP).where(

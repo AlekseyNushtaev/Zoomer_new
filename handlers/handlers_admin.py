@@ -1,11 +1,15 @@
 import random
+import os
+import tempfile
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
+import openpyxl
+from openpyxl.styles import Alignment, Border, Side
 from sqlalchemy import select
 
 from bot import sql, x3, bot
-from config import ADMIN_IDS, CHECKER_ID
+from config import ADMIN_IDS, CHECKER_ID, API_FREEKASSA, SHOP_ID_FREEKASSA
 from telegram_ids import is_telegram_chat_id
 from config_bd.models import Users
 from X3 import panel_username_for_site_user
@@ -21,10 +25,12 @@ from lexicon import lexicon
 from logging_config import logger
 import asyncio
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.filters import Command
 
 from sheduler.check_connect import check_connect
+from sheduler.check_fk import fetch_fk_payment_check_status
+from payments.pay_freekassa import FreekassaPayment
 from wl_traffic.service import (
     fetch_panel_user,
     fetch_wl_traffic_gb_for_day,
@@ -44,6 +50,18 @@ _ADD_7_MAY_GIFT_HTML = (
     "Пользуйтесь спокойно и безопасно в сети. ✨\n\n"
     "Ниже — кнопка, чтобы сразу перейти к подключению 👇"
 )
+
+_EXCEL_COL_WIDTH_MAX = 255
+
+
+def _parse_check_fk_date(raw: str) -> Optional[datetime]:
+    for fmt in ("%d.%m.%y", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(raw.strip(), fmt)
+        except ValueError:
+            continue
+    return None
+
 
 router = Router()
 
@@ -850,6 +868,118 @@ async def check_users_command(message: Message):
     except Exception as e:
         logger.exception("Ошибка в /check_users")
         await message.answer(f"❌ Ошибка: {str(e)}")
+
+
+@router.message(Command(commands=['check_fk']))
+async def check_fk_command(message: Message):
+    """Проверка всех платежей FreeKassa с указанной даты через API; выгрузка в Excel."""
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.answer(
+            "❌ Использование: /check_fk DD.MM.YY\n"
+            "Пример: /check_fk 01.08.25"
+        )
+        return
+
+    since = _parse_check_fk_date(args[1])
+    if since is None:
+        await message.answer(f"❌ Неверный формат даты: {args[1]}\nОжидается DD.MM.YY или DD.MM.YYYY")
+        return
+
+    if not API_FREEKASSA or SHOP_ID_FREEKASSA is None:
+        await message.answer("❌ FreeKassa API не настроен (API_FREEKASSA / SHOP_ID_FREEKASSA).")
+        return
+
+    await message.answer(
+        f"🔄 Проверяю платежи FreeKassa с {since.strftime('%d.%m.%Y')} через API..."
+    )
+
+    export_path = None
+    try:
+        payments = await sql.get_fk_sbp_payments_from_date(since)
+        if not payments:
+            await message.answer(f"ℹ️ Платежей FreeKassa с {since.strftime('%d.%m.%Y')} не найдено.")
+            return
+
+        fk = FreekassaPayment(API_FREEKASSA, SHOP_ID_FREEKASSA)
+        checked: list[tuple] = []
+        for i, pay in enumerate(payments, 1):
+            status_check = await fetch_fk_payment_check_status(pay, fk)
+            checked.append((pay, status_check))
+            if i % 10 == 0:
+                await message.answer(f"⏳ Проверено {i}/{len(payments)}...")
+
+        header_alignment = Alignment(horizontal="center", vertical="center")
+        thin_border = Border(
+            left=Side(style='thin'), right=Side(style='thin'),
+            top=Side(style='thin'), bottom=Side(style='thin'),
+        )
+        fk_columns = [
+            "ID", "User ID", "Amount", "Time Created", "Is Gift", "Status",
+            "Status_check", "Transaction_Id", "FK_Order_Id", "Nonce", "Signature", "Method", "Payload",
+        ]
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "payments_fk_sbp"
+        for col_num, title in enumerate(fk_columns, 1):
+            cell = ws.cell(row=1, column=col_num, value=title)
+            cell.alignment = header_alignment
+            cell.border = thin_border
+
+        for row_num, (pay, status_check) in enumerate(checked, 2):
+            row_data = [
+                pay.id, pay.user_id, pay.amount, pay.time_created,
+                pay.is_gift, pay.status, status_check, pay.transaction_id, pay.fk_order_id,
+                pay.nonce, pay.signature, pay.method, pay.payload,
+            ]
+            for col_num, value in enumerate(row_data, 1):
+                if col_num == 4 and value and isinstance(value, datetime):
+                    value = value.strftime('%Y-%m-%d %H:%M:%S')
+                cell = ws.cell(row=row_num, column=col_num, value=value)
+                cell.border = thin_border
+
+        for col in ws.columns:
+            max_len = 0
+            col_letter = col[0].column_letter
+            for cell in col:
+                if cell.value:
+                    max_len = max(max_len, len(str(cell.value)))
+            ws.column_dimensions[col_letter].width = min(max_len + 2, _EXCEL_COL_WIDTH_MAX)
+
+        export_path = tempfile.mktemp(suffix='.xlsx')
+        wb.save(export_path)
+
+        mismatch = sum(1 for pay, sc in checked if pay.status != sc and sc != "error")
+        confirmed_api = sum(1 for _, sc in checked if sc == "confirmed")
+        caption = (
+            f"📊 Проверка FreeKassa с {since.strftime('%d.%m.%Y')}\n"
+            f"📅 Создано: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
+            f"Всего платежей: {len(checked)}\n"
+            f"Подтверждено по API: {confirmed_api}\n"
+            f"Расхождение Status ≠ Status_check: {mismatch}"
+        )
+        await message.answer_document(
+            document=FSInputFile(export_path, filename=f"check_fk_{since.strftime('%d.%m.%y')}.xlsx"),
+            caption=caption,
+        )
+        logger.info(
+            f"Админ {message.from_user.id} выполнил /check_fk {args[1]}: "
+            f"{len(checked)} платежей, расхождений {mismatch}"
+        )
+
+    except Exception as e:
+        logger.exception("Ошибка в /check_fk")
+        await message.answer(f"❌ Ошибка: {str(e)}")
+    finally:
+        if export_path:
+            try:
+                os.remove(export_path)
+            except OSError:
+                pass
 
 
 @router.message(Command(commands=['new']))
