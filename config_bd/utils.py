@@ -83,6 +83,37 @@ def _payload_duration_to_panel_days(raw: Optional[str]) -> Optional[int]:
         return None
 
 
+def _parse_traffic_duration(raw: Optional[str]) -> Optional[int]:
+    """duration:traffic10 -> 10 GB; иначе None."""
+    if not raw:
+        return None
+    s = str(raw).strip()
+    if not s.startswith("traffic"):
+        return None
+    try:
+        return int(s.replace("traffic", ""))
+    except ValueError:
+        return None
+
+
+def _payment_method_label(raw: Optional[str]) -> str:
+    if not raw:
+        return "—"
+    key = raw.strip().lower()
+    labels = {
+        "sbp": "Platega СБП",
+        "card": "Platega карта",
+        "crypto": "Platega крипто",
+        "wata_sbp": "WATA СБП",
+        "wata_card": "WATA карта",
+        "fk_sbp": "FreeKassa СБП",
+        "fk_card": "FreeKassa карта",
+        "stars": "Stars",
+        "cryptobot": "CryptoBot",
+    }
+    return labels.get(key, raw.strip())
+
+
 def _white_days_from_amount_fallback(amount: Any) -> Optional[int]:
     """Дни вайт-подписки по сумме (dct_price, ключи с white)."""
     try:
@@ -2691,13 +2722,12 @@ class AsyncSQL:
 
     async def get_user_subscription_payment_report(
         self, user_id: int
-    ) -> List[Tuple[datetime, str, str]]:
+    ) -> List[Tuple[datetime, str, str, str]]:
         """
         Успешные платежи пользователя (confirmed/paid) по всем таблицам оплат.
-        Возвращает список (time_created UTC naive, тип подписки, кол-во дней как строка).
-        Дни из payload duration; иначе эвристика по сумме (в т.ч. white_30).
+        Возвращает список (time_created, тип, способ оплаты, детали: «N дн.» или «N GB»).
         """
-        rows_acc: List[Tuple[datetime, str, str]] = []
+        rows_acc: List[Tuple[datetime, str, str, str]] = []
 
         def _parse_map(payload: Optional[str]) -> dict[str, str]:
             if not payload:
@@ -2710,13 +2740,20 @@ class AsyncSQL:
                 out[k.strip()] = v.strip()
             return out
 
-        def _row_kind_and_days(
+        def _row_report_fields(
             payload: Optional[str], is_gift: bool, amount: Any
-        ) -> Tuple[str, str]:
+        ) -> Tuple[str, str, str]:
             m = _parse_map(payload)
+            method = _payment_method_label(m.get("method"))
+            raw_duration = m.get("duration")
+
+            traffic_gb = _parse_traffic_duration(raw_duration)
+            if traffic_gb is not None:
+                return "Трафик", method, f"{traffic_gb} GB"
+
             white = m.get("white", "False").lower() == "true"
             gift = bool(is_gift) or m.get("gift", "False").lower() == "true"
-            dur = _payload_duration_to_panel_days(m.get("duration"))
+            dur = _payload_duration_to_panel_days(raw_duration)
             if dur is None:
                 try:
                     amt_f = float(amount)
@@ -2737,8 +2774,8 @@ class AsyncSQL:
             else:
                 label = "Обычная"
 
-            days_s = str(dur) if dur is not None else "—"
-            return label, days_s
+            days_s = f"{dur} дн." if dur is not None else "—"
+            return label, method, days_s
 
         async with self.session_factory() as session:
             queries: List[Any] = [
@@ -2825,8 +2862,8 @@ class AsyncSQL:
             ]
             for q in queries:
                 for _uid, tc, amt, pl, ig in (await session.execute(q)).all():
-                    kind, days_s = _row_kind_and_days(pl, bool(ig), amt)
-                    rows_acc.append((tc, kind, days_s))
+                    kind, method, detail = _row_report_fields(pl, bool(ig), amt)
+                    rows_acc.append((tc, kind, method, detail))
 
         rows_acc.sort(key=lambda x: (x[0], x[1]))
         return rows_acc

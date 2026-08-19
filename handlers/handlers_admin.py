@@ -297,9 +297,9 @@ async def pay_info_command(message: Message):
 
     pay_rows = await sql.get_user_subscription_payment_report(target_id)
     pay_lines: list[str] = []
-    for tc, kind, days_s in pay_rows:
+    for tc, kind, method, detail in pay_rows:
         ts = _pay_dt_str(tc)
-        pay_lines.append(f"• {ts} — {kind} — {days_s} дн.")
+        pay_lines.append(f"• {ts} — {kind} — {method} — {detail}")
 
     trafic_wl, limit_wl = await sql.get_wl_limits(target_id)
     used_wl_gb = await get_wl_used_gb_for_user(x3, target_id, trafic_wl, sql=sql)
