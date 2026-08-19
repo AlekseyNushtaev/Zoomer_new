@@ -5,7 +5,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import openpyxl
-from openpyxl.styles import Alignment, Border, Side
+from openpyxl.styles import Alignment, Border, Side, PatternFill
 from sqlalchemy import select
 
 from bot import sql, x3, bot
@@ -917,6 +917,7 @@ async def check_fk_command(message: Message):
             left=Side(style='thin'), right=Side(style='thin'),
             top=Side(style='thin'), bottom=Side(style='thin'),
         )
+        light_red_fill = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")
         fk_columns = [
             "ID", "User ID", "Amount", "Time Created", "Is Gift", "Status",
             "Status_check", "Transaction_Id", "FK_Order_Id", "Nonce", "Signature", "Method", "Payload",
@@ -936,11 +937,14 @@ async def check_fk_command(message: Message):
                 pay.is_gift, pay.status, status_check, pay.transaction_id, pay.fk_order_id,
                 pay.nonce, pay.signature, pay.method, pay.payload,
             ]
+            mismatch_row = pay.status != status_check
             for col_num, value in enumerate(row_data, 1):
                 if col_num == 4 and value and isinstance(value, datetime):
                     value = value.strftime('%Y-%m-%d %H:%M:%S')
                 cell = ws.cell(row=row_num, column=col_num, value=value)
                 cell.border = thin_border
+                if mismatch_row:
+                    cell.fill = light_red_fill
 
         for col in ws.columns:
             max_len = 0
@@ -953,7 +957,7 @@ async def check_fk_command(message: Message):
         export_path = tempfile.mktemp(suffix='.xlsx')
         wb.save(export_path)
 
-        mismatch = sum(1 for pay, sc in checked if pay.status != sc and sc != "error")
+        mismatch = sum(1 for pay, sc in checked if pay.status != sc)
         confirmed_api = sum(1 for _, sc in checked if sc == "confirmed")
         caption = (
             f"📊 Проверка FreeKassa с {since.strftime('%d.%m.%Y')}\n"
