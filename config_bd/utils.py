@@ -1971,11 +1971,16 @@ class AsyncSQL:
             result = await session.execute(stmt)
             return result.scalars().all()
 
-    async def get_fk_sbp_payments_from_date(self, since: datetime) -> List[PaymentsFkSBP]:
+    async def get_fk_sbp_payments_for_date(self, day: date) -> List[PaymentsFkSBP]:
+        day_start = datetime.combine(day, datetime.min.time())
+        day_end = day_start + timedelta(days=1)
         async with self.session_factory() as session:
             stmt = (
                 select(PaymentsFkSBP)
-                .where(PaymentsFkSBP.time_created >= since)
+                .where(
+                    PaymentsFkSBP.time_created >= day_start,
+                    PaymentsFkSBP.time_created < day_end,
+                )
                 .order_by(PaymentsFkSBP.time_created)
             )
             result = await session.execute(stmt)

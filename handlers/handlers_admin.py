@@ -1,7 +1,7 @@
 import random
 import os
 import tempfile
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, date, timezone, timedelta
 from typing import Optional
 
 import openpyxl
@@ -54,10 +54,10 @@ _ADD_7_MAY_GIFT_HTML = (
 _EXCEL_COL_WIDTH_MAX = 255
 
 
-def _parse_check_fk_date(raw: str) -> Optional[datetime]:
+def _parse_check_fk_date(raw: str) -> Optional[date]:
     for fmt in ("%d.%m.%y", "%d.%m.%Y"):
         try:
-            return datetime.strptime(raw.strip(), fmt)
+            return datetime.strptime(raw.strip(), fmt).date()
         except ValueError:
             continue
     return None
@@ -872,7 +872,7 @@ async def check_users_command(message: Message):
 
 @router.message(Command(commands=['check_fk']))
 async def check_fk_command(message: Message):
-    """Проверка всех платежей FreeKassa с указанной даты через API; выгрузка в Excel."""
+    """Проверка платежей FreeKassa за указанный день через API; выгрузка в Excel."""
     if message.from_user.id not in ADMIN_IDS:
         return
 
@@ -884,8 +884,8 @@ async def check_fk_command(message: Message):
         )
         return
 
-    since = _parse_check_fk_date(args[1])
-    if since is None:
+    day = _parse_check_fk_date(args[1])
+    if day is None:
         await message.answer(f"❌ Неверный формат даты: {args[1]}\nОжидается DD.MM.YY или DD.MM.YYYY")
         return
 
@@ -894,14 +894,14 @@ async def check_fk_command(message: Message):
         return
 
     await message.answer(
-        f"🔄 Проверяю платежи FreeKassa с {since.strftime('%d.%m.%Y')} через API..."
+        f"🔄 Проверяю платежи FreeKassa за {day.strftime('%d.%m.%Y')} через API..."
     )
 
     export_path = None
     try:
-        payments = await sql.get_fk_sbp_payments_from_date(since)
+        payments = await sql.get_fk_sbp_payments_for_date(day)
         if not payments:
-            await message.answer(f"ℹ️ Платежей FreeKassa с {since.strftime('%d.%m.%Y')} не найдено.")
+            await message.answer(f"ℹ️ Платежей FreeKassa за {day.strftime('%d.%m.%Y')} не найдено.")
             return
 
         fk = FreekassaPayment(API_FREEKASSA, SHOP_ID_FREEKASSA)
@@ -960,14 +960,14 @@ async def check_fk_command(message: Message):
         mismatch = sum(1 for pay, sc in checked if pay.status != sc)
         confirmed_api = sum(1 for _, sc in checked if sc == "confirmed")
         caption = (
-            f"📊 Проверка FreeKassa с {since.strftime('%d.%m.%Y')}\n"
+            f"📊 Проверка FreeKassa за {day.strftime('%d.%m.%Y')}\n"
             f"📅 Создано: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
             f"Всего платежей: {len(checked)}\n"
             f"Подтверждено по API: {confirmed_api}\n"
             f"Расхождение Status ≠ Status_check: {mismatch}"
         )
         await message.answer_document(
-            document=FSInputFile(export_path, filename=f"check_fk_{since.strftime('%d.%m.%y')}.xlsx"),
+            document=FSInputFile(export_path, filename=f"check_fk_{day.strftime('%d.%m.%y')}.xlsx"),
             caption=caption,
         )
         logger.info(
