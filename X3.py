@@ -1031,45 +1031,67 @@ class X3:
         logger.warning(f"get_node_uuid_by_name: нода «{node_name}» не найдена")
         return None
 
+    @staticmethod
+    def _bandwidth_users_records_from_response(data: dict) -> Optional[List[dict]]:
+        resp = data.get("response") or data
+        if isinstance(resp, list):
+            return resp
+        if isinstance(resp, dict):
+            top_users = resp.get("topUsers")
+            if isinstance(top_users, list):
+                return top_users
+            series = resp.get("series")
+            if isinstance(series, list):
+                return series
+        return None
+
     async def get_node_users_bandwidth_legacy(
-        self, node_uuid: str, start: str, end: str,
+        self,
+        node_uuid: str,
+        start: str,
+        end: str,
+        *,
+        top_users_limit: int = 5000,
     ) -> Optional[List[dict]]:
         """
-        Трафик всех пользователей на ноде за период (legacy bulk).
-        Пробует новый и старый путь API.
+        Bulk-трафик пользователей на ноде за период.
+        GET /api/bandwidth-stats/nodes/{nodeUuid}/users → response.topUsers.
         """
-        params = {**self.params, "start": start, "end": end}
-        urls = (
-            f"{self.target_url}/api/bandwidth-stats/nodes/{node_uuid}/users/legacy",
-            f"{self.target_url}/api/nodes/usage/{node_uuid}/users/range",
-        )
+        params = {
+            **self.params,
+            "start": start,
+            "end": end,
+            "topUsersLimit": str(top_users_limit),
+        }
+        url = f"{self.target_url}/api/bandwidth-stats/nodes/{node_uuid}/users"
         try:
             session = await self._get_session()
-            for url in urls:
-                async with session.get(
-                    url,
-                    params=params,
-                    timeout=aiohttp.ClientTimeout(total=120),
-                ) as response:
-                    if response.status == 404:
-                        continue
-                    if response.status != 200:
-                        err = (await response.text())[:300]
-                        logger.warning(
-                            f"node users bandwidth {node_uuid}: HTTP {response.status}: {err}"
-                        )
-                        continue
-                    try:
-                        data = await response.json()
-                    except (aiohttp.ContentTypeError, ValueError):
-                        continue
-                    resp = data.get("response") or data
-                    if isinstance(resp, list):
-                        return resp
-            logger.error(
-                f"node users bandwidth {node_uuid}: ни один legacy-эндпoинт не вернул данные"
-            )
-            return None
+            async with session.get(
+                url,
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=120),
+            ) as response:
+                if response.status != 200:
+                    err = (await response.text())[:300]
+                    logger.error(
+                        f"node users bandwidth {node_uuid}: HTTP {response.status}: {err}"
+                    )
+                    return None
+                try:
+                    data = await response.json()
+                except (aiohttp.ContentTypeError, ValueError):
+                    logger.error(f"node users bandwidth {node_uuid}: не удалось прочитать JSON")
+                    return None
+                records = self._bandwidth_users_records_from_response(data)
+                if not records:
+                    logger.error(
+                        f"node users bandwidth {node_uuid}: ответ без topUsers/series"
+                    )
+                    return None
+                logger.debug(
+                    f"node users bandwidth {node_uuid}: получено {len(records)} записей"
+                )
+                return records
         except Exception as e:
             logger.error(f"node users bandwidth {node_uuid}: {e}")
             return None

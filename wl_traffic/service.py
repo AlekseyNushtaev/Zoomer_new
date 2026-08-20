@@ -16,6 +16,7 @@ from wl_traffic.constants import (
     WL_LEGACY_RETRIES,
     WL_LOW_TRAFFIC_WARNING_GB,
     WL_NODE_NAME,
+    WL_TOP_USERS_LIMIT,
     WL_SQUAD_ACTIVE,
     WL_SQUAD_LIMITED,
     WL_SUBSCRIPTION_MONTHS,
@@ -215,7 +216,9 @@ async def fetch_wl_traffic_gb_for_day(
         return {}, {}
 
     for attempt in range(max(1, retries)):
-        records = await x3.get_node_users_bandwidth_legacy(node_uuid, day_str, day_str)
+        records = await x3.get_node_users_bandwidth_legacy(
+            node_uuid, day_str, day_str, top_users_limit=WL_TOP_USERS_LIMIT,
+        )
         if records:
             filtered = filter_records_for_day(records, day)
             by_username = {
