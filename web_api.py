@@ -501,8 +501,32 @@ SubPageAuth = Annotated[None, Depends(require_sub_page_auth)]
 
 
 class SubPagePayIn(BaseModel):
-    user_id: int = Field(..., description="Telegram user id")
+    user_id: int = Field(..., description="Telegram user id или отрицательный billing id сайта")
     duration: SubPageDuration
+
+
+async def _resolve_sub_page_payer(user_id: int) -> tuple[str, int]:
+    """payload_user и billing_user_id для оплаты со страницы подписки."""
+    if user_id > 0:
+        return str(user_id), user_id
+    row = await sql.get_user(user_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
+    em = row[18]
+    if not em:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "У пользователя сайта нет email — оплата недоступна",
+        )
+    return _norm_email(str(em)), int(row[1])
+
+
+def _reject_sub_page_telegram_only_pay(user_id: int) -> None:
+    if user_id <= 0:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Для пользователей сайта доступна оплата только СБП и картой.",
+        )
 
 
 async def _bot_deeplink_for_sub_page() -> str:
@@ -980,15 +1004,16 @@ async def sub_page_pay_fk_sbp(body: SubPagePayIn, request: Request, _: SubPageAu
     _reject_mobile_purchase(body.duration)
 
     desc_key, duration_str, white = _tariff_parts(body.duration)
+    payload_user, billing_user_id = await _resolve_sub_page_payer(body.user_id)
     price = dct_price[body.duration]
-    if body.user_id in ADMIN_IDS:
+    if billing_user_id in ADMIN_IDS:
         price = 1
 
     result = await pay_site(
         val=str(price),
         des=dct_desc[desc_key],
-        payload_user=str(body.user_id),
-        billing_user_id=body.user_id,
+        payload_user=payload_user,
+        billing_user_id=billing_user_id,
         duration=duration_str,
         white=white,
         is_gift=False,
@@ -1018,15 +1043,16 @@ async def sub_page_pay_fk_card(body: SubPagePayIn, request: Request, _: SubPageA
     _reject_mobile_purchase(body.duration)
 
     desc_key, duration_str, white = _tariff_parts(body.duration)
+    payload_user, billing_user_id = await _resolve_sub_page_payer(body.user_id)
     price = dct_price[body.duration]
-    if body.user_id in ADMIN_IDS:
+    if billing_user_id in ADMIN_IDS:
         price = 1
 
     result = await pay_site(
         val=str(price),
         des=dct_desc[desc_key],
-        payload_user=str(body.user_id),
-        billing_user_id=body.user_id,
+        payload_user=payload_user,
+        billing_user_id=billing_user_id,
         duration=duration_str,
         white=white,
         is_gift=False,
@@ -1051,6 +1077,7 @@ async def sub_page_pay_fk_card(body: SubPagePayIn, request: Request, _: SubPageA
 @app.post("/api/v1/sub_page/pay/stars")
 async def sub_page_pay_stars(body: SubPagePayIn, request: Request, _: SubPageAuth):
     _rate_limit_or_raise(_client_ip_for_rate_limit(request), "sub_page_stars", max_req=20, window=300)
+    _reject_sub_page_telegram_only_pay(body.user_id)
     _reject_mobile_purchase(body.duration)
 
     desc_key, duration_str, white = _tariff_parts(body.duration)
@@ -1093,6 +1120,7 @@ async def sub_page_pay_stars(body: SubPagePayIn, request: Request, _: SubPageAut
 @app.post("/api/v1/sub_page/pay/cryptobot")
 async def sub_page_pay_cryptobot(body: SubPagePayIn, request: Request, _: SubPageAuth):
     _rate_limit_or_raise(_client_ip_for_rate_limit(request), "sub_page_cryptobot", max_req=20, window=300)
+    _reject_sub_page_telegram_only_pay(body.user_id)
     if not CRYPTOBOT_API_TOKEN:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "CryptoBot не настроен")
     _reject_mobile_purchase(body.duration)

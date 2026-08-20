@@ -84,7 +84,7 @@ async def _resolve_buyer_for_payment(
         use_add_client_site,
         site_email_norm — email для add_client_site или None,
     ).
-    raw_user_id — telegram id или email.
+    raw_user_id — telegram id, отрицательный billing id сайта или email.
     """
     raw = str(raw_user_id).strip()
     if "@" in raw:
@@ -119,8 +119,28 @@ async def _resolve_buyer_for_payment(
         return user_id_str, db_uid, notify_tg, use_site, site_em
 
     db_uid = int(raw)
-    user_id_str = str(db_uid)
-    return user_id_str, db_uid, db_uid, False, None
+    if db_uid > 0:
+        return str(db_uid), db_uid, db_uid, False, None
+
+    row = await sql.get_user(db_uid)
+    if row is None:
+        logger.error("Платёж: пользователь сайта {} не найден в БД", db_uid)
+        return None
+    linked = row[28] if len(row) > 28 else None
+    email_norm = _norm_email(str(row[18])) if row[18] else None
+    notify_tg: Optional[int] = None
+    if linked is not None:
+        try:
+            tid = int(linked)
+            if tid > 0:
+                notify_tg = tid
+        except (TypeError, ValueError):
+            pass
+    user_id_str = panel_username_for_site_user(db_uid, white_flag)
+    if not email_norm:
+        logger.error("Платёж сайта: нет email у user_id={}", db_uid)
+        return user_id_str, db_uid, notify_tg, False, None
+    return user_id_str, db_uid, notify_tg, True, email_norm
 
 
 async def _apply_panel_subscription(
