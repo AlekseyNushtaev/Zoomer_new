@@ -7,6 +7,7 @@ from typing import Optional, Union
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (
     CallbackQuery,
+    InaccessibleMessage,
     InlineKeyboardMarkup,
     InputMediaPhoto,
     Message,
@@ -180,6 +181,12 @@ async def edit_or_send_photo(
         chat_id = message.chat.id
         message_id = message.message_id
 
+    if isinstance(message, InaccessibleMessage):
+        await _replace_photo_message(
+            chat_id, message_id, photo_key, caption, reply_markup
+        )
+        return
+
     if message.photo:
         try:
             await message.edit_media(
@@ -286,6 +293,9 @@ async def edit_or_send_screen(
 ) -> None:
     """Редактирует photo-caption или text-сообщение; при ошибке отправляет новое."""
     message = callback.message
+    if isinstance(message, InaccessibleMessage):
+        await edit_or_send_photo(callback, photo_key, text, reply_markup)
+        return
     if message.photo:
         await edit_or_send_photo(callback, photo_key, text, reply_markup)
         return
