@@ -653,13 +653,13 @@ async def check_online(message: Message):
             random_squad = random.choice([squad_1, squad_2])
             username = user.get('username', '')
             if 'white' not in username and 'cascade-bridge-system' not in username:
-                uuid = user.get('uuid')
+                panel_user_id = user.get('id')
                 if user['userTraffic']['firstConnectedAt']:
                     connected_str = user['userTraffic']['onlineAt']
                     connected_dt = datetime.fromisoformat(connected_str.replace('Z', '+00:00'))
                     connected_date = connected_dt.date()
-                    if connected_date == datetime.now().date() and uuid:
-                        if await x3.update_user_squads(uuid, random_squad):
+                    if connected_date == datetime.now().date() and panel_user_id is not None:
+                        if await x3.update_user_squads(int(panel_user_id), random_squad):
                             success_count += 1
                         else:
                             fail_count += 1
@@ -1068,14 +1068,14 @@ async def new_panel_users_command(message: Message):
         )
 
         async def bulk_apply_chunk(chunk: list, label: str) -> str:
-            uuids = [str(u["uuid"]) for u in chunk if u.get("uuid")]
-            if not uuids:
+            user_ids = [int(u["id"]) for u in chunk if u.get("id") is not None]
+            if not user_ids:
                 return f"bulk чанк {label}: пусто, пропуск"
             total_affected = 0
             all_ok = True
-            n_batches = (len(uuids) + _NEW_BULK_UUID_BATCH - 1) // _NEW_BULK_UUID_BATCH
-            for off in range(0, len(uuids), _NEW_BULK_UUID_BATCH):
-                batch = uuids[off : off + _NEW_BULK_UUID_BATCH]
+            n_batches = (len(user_ids) + _NEW_BULK_UUID_BATCH - 1) // _NEW_BULK_UUID_BATCH
+            for off in range(0, len(user_ids), _NEW_BULK_UUID_BATCH):
+                batch = user_ids[off : off + _NEW_BULK_UUID_BATCH]
                 squad = random.choice(_NEW_BULK_SQUAD_CHOICES)
                 ok, aff = await x3.bulk_update_internal_squads(batch, [squad])
                 total_affected += aff
@@ -1089,7 +1089,7 @@ async def new_panel_users_command(message: Message):
                 await asyncio.sleep(0.15)
             st = "ok" if all_ok else "были ошибки (см. лог)"
             return (
-                f"bulk чанк {label}: UUID {len(uuids)}, батчей {n_batches}, "
+                f"bulk чанк {label}: id {len(user_ids)}, батчей {n_batches}, "
                 f"affected_rows Σ={total_affected}, сквад на каждый запрос случайный, {st}"
             )
 

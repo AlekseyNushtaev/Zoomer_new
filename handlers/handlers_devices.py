@@ -81,15 +81,16 @@ async def _slot_context(telegram_id: int, slot_key: str) -> tuple[str, str, str]
     user = x3._panel_user_from_response(panel_resp)
     if not user:
         return None
-    user_uuid = user.get('uuid')
-    if not user_uuid:
+    panel_user_id = x3._panel_user_id(user)
+    if panel_user_id is None:
         return None
+    panel_user_id_str = str(panel_user_id)
     if x3._panel_user_subscription_usable(user):
-        return "💫 VPN PRO", user_uuid, username
+        return "💫 VPN PRO", panel_user_id_str, username
 
     db_user = await sql.get_user(telegram_id)
     if has_active_subscription(db_user):
-        return "💫 VPN PRO", user_uuid, username
+        return "💫 VPN PRO", panel_user_id_str, username
     return None
 
 

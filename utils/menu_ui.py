@@ -137,9 +137,9 @@ async def connect_screen_extra(uid: int, user_data: tuple) -> str:
     panel_user = x3._panel_user_from_response(panel_resp)
     if panel_user:
         device_limit = panel_user.get("hwidDeviceLimit") or 5
-        user_uuid = panel_user.get("uuid")
-        if user_uuid:
-            _devices, devices_count = await x3.get_user_hwid_devices(user_uuid)
+        panel_user_id = x3._panel_user_id(panel_user)
+        if panel_user_id is not None:
+            _devices, devices_count = await x3.get_user_hwid_devices(str(panel_user_id))
 
     devices_block = f"📱 Устройства: {devices_count} / {device_limit}"
     return f"{wl_block}\n{devices_block}"
