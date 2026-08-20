@@ -7,6 +7,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from bot import bot
 from config import ADMIN_IDS, THROTTLE_MAX_UPDATES, THROTTLE_WINDOW_SEC, WEB_API_PORT
+from utils.menu_photos import init_menu_photos
 from middleware.user_throttle import UserThrottleMiddleware
 from config_bd.models import create_tables, engine
 from payments import pay_stars, pay_cryptobot, pay_platega, pay_freekassa, pay_wl_traffic
@@ -131,6 +132,7 @@ async def main() -> None:
     scheduler.start()
 
     await set_commands(bot)
+    await init_menu_photos(bot)
 
     uv_config = uvicorn.Config(web_app, host="0.0.0.0", port=WEB_API_PORT)
     server = uvicorn.Server(uv_config)

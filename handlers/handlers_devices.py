@@ -10,17 +10,20 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from bot import x3
 from keyboard import (
     BTN_BACK,
+    create_kb,
     keyboard_devices_confirm,
     keyboard_devices_list,
-    keyboard_devices_subscriptions,
 )
 from logging_config import logger
+from utils.menu_ui import edit_or_send_photo
 
 router = Router()
 
-_DEV_SUB_RE = re.compile(r"^dev_sub_(main|white)$")
-_DEV_RM_RE = re.compile(r"^dev_rm_(main|white)_(\d+)$")
-_DEV_RM_YES_RE = re.compile(r"^dev_rm_yes_(main|white)_(\d+)$")
+_DEFAULT_SLOT = "main"
+
+_DEV_SUB_RE = re.compile(r"^dev_sub_main$")
+_DEV_RM_RE = re.compile(r"^dev_rm_main_(\d+)$")
+_DEV_RM_YES_RE = re.compile(r"^dev_rm_yes_main_(\d+)$")
 
 
 def _device_display_name(device: dict[str, Any]) -> str:
@@ -72,15 +75,20 @@ async def _slot_context(telegram_id: int, slot_key: str) -> tuple[str, str, str]
     return None
 
 
-def _subscriptions_text() -> str:
-    return (
-        "📱 <b>Управление устройствами</b>\n\n"
-        "Выберите подписку:"
-    )
-
-
 def _no_subscriptions_text() -> str:
     return "У вас нет активных подписок"
+
+
+def _no_subscriptions_markup() -> InlineKeyboardMarkup:
+    return create_kb(1, back_to_main=BTN_BACK)
+
+
+async def _edit_devices_screen(
+    callback: CallbackQuery,
+    text: str,
+    reply_markup: InlineKeyboardMarkup,
+) -> None:
+    await edit_or_send_photo(callback, "manage_devices", text, reply_markup)
 
 
 async def _devices_screen_text(
@@ -120,28 +128,15 @@ async def _devices_screen_text(
     return "\n".join(lines), devices, btn_rows
 
 
-async def _show_subscriptions(callback: CallbackQuery) -> None:
-    slots = await _active_slots(callback.from_user.id)
-    if not slots:
-        await callback.message.edit_text(
-            text=_no_subscriptions_text(),
-            reply_markup=keyboard_devices_subscriptions([]),
-        )
-        return
-
-    await callback.message.edit_text(
-        text=_subscriptions_text(),
-        reply_markup=keyboard_devices_subscriptions(
-            [(slot_key, label) for slot_key, label, _uuid in slots]
-        ),
-    )
-
-
-async def _show_devices(callback: CallbackQuery, slot_key: str) -> None:
+async def _show_devices(callback: CallbackQuery, slot_key: str = _DEFAULT_SLOT) -> None:
     ctx = await _slot_context(callback.from_user.id, slot_key)
     if not ctx:
         await callback.answer("Подписка не найдена или истекла", show_alert=True)
-        await _show_subscriptions(callback)
+        await _edit_devices_screen(
+            callback,
+            _no_subscriptions_text(),
+            _no_subscriptions_markup(),
+        )
         return
 
     label, user_uuid, username = ctx
@@ -150,15 +145,16 @@ async def _show_devices(callback: CallbackQuery, slot_key: str) -> None:
     if not devices:
         markup = InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text=BTN_BACK, callback_data="dev_back_subs")]
+                [InlineKeyboardButton(text=BTN_BACK, callback_data="back_to_main")]
             ]
         )
-        await callback.message.edit_text(text=text, reply_markup=markup)
+        await _edit_devices_screen(callback, text, markup)
         return
 
-    await callback.message.edit_text(
-        text=text,
-        reply_markup=keyboard_devices_list(slot_key, btn_rows),
+    await _edit_devices_screen(
+        callback,
+        text,
+        keyboard_devices_list(slot_key, btn_rows),
     )
 
 
@@ -167,31 +163,29 @@ async def manage_devices_entry(callback: CallbackQuery) -> None:
     await callback.answer()
     slots = await _active_slots(callback.from_user.id)
     if not slots:
-        await callback.message.answer(
-            text=_no_subscriptions_text(),
-            reply_markup=keyboard_devices_subscriptions([]),
+        await edit_or_send_photo(
+            callback,
+            "manage_devices",
+            _no_subscriptions_text(),
+            _no_subscriptions_markup(),
         )
         return
 
-    await callback.message.answer(
-        text=_subscriptions_text(),
-        reply_markup=keyboard_devices_subscriptions(
-            [(slot_key, label) for slot_key, label, _uuid in slots]
-        ),
-    )
+    await _show_devices(callback, _DEFAULT_SLOT)
 
 
 @router.callback_query(F.data == "dev_back_subs")
 async def devices_back_to_subscriptions(callback: CallbackQuery) -> None:
+    """Старые сообщения — сразу список устройств."""
     await callback.answer()
-    await _show_subscriptions(callback)
+    await _show_devices(callback, _DEFAULT_SLOT)
 
 
 @router.callback_query(F.data.regexp(_DEV_SUB_RE))
 async def devices_pick_subscription(callback: CallbackQuery) -> None:
+    """Старые сообщения с выбором подписки — сразу список устройств."""
     await callback.answer()
-    slot_key = callback.data.removeprefix("dev_sub_")
-    await _show_devices(callback, slot_key)
+    await _show_devices(callback, _DEFAULT_SLOT)
 
 
 def _delete_confirm_text(label: str, device_name: str) -> str:
@@ -209,7 +203,11 @@ async def _resolve_device_removal(
     ctx = await _slot_context(callback.from_user.id, slot_key)
     if not ctx:
         await callback.answer("Подписка не найдена или истекла", show_alert=True)
-        await _show_subscriptions(callback)
+        await _edit_devices_screen(
+            callback,
+            _no_subscriptions_text(),
+            _no_subscriptions_markup(),
+        )
         return None
 
     label, user_uuid, username = ctx
@@ -230,8 +228,8 @@ async def devices_delete_confirm(callback: CallbackQuery) -> None:
         await callback.answer()
         return
 
-    slot_key, idx_str = match.groups()
-    device_idx = int(idx_str)
+    slot_key = "main"
+    device_idx = int(match.group(1))
 
     resolved = await _resolve_device_removal(callback, slot_key, device_idx)
     if not resolved:
@@ -241,9 +239,10 @@ async def devices_delete_confirm(callback: CallbackQuery) -> None:
     device_name = _device_display_name(device)
 
     await callback.answer()
-    await callback.message.edit_text(
-        text=_delete_confirm_text(label, device_name),
-        reply_markup=keyboard_devices_confirm(slot_key, device_idx),
+    await _edit_devices_screen(
+        callback,
+        _delete_confirm_text(label, device_name),
+        keyboard_devices_confirm(slot_key, device_idx),
     )
 
 
@@ -254,8 +253,8 @@ async def devices_delete_device(callback: CallbackQuery) -> None:
         await callback.answer()
         return
 
-    slot_key, idx_str = match.groups()
-    device_idx = int(idx_str)
+    slot_key = "main"
+    device_idx = int(match.group(1))
 
     resolved = await _resolve_device_removal(callback, slot_key, device_idx)
     if not resolved:
@@ -283,13 +282,14 @@ async def devices_delete_device(callback: CallbackQuery) -> None:
     if not fresh_devices:
         markup = InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text=BTN_BACK, callback_data="dev_back_subs")]
+                [InlineKeyboardButton(text=BTN_BACK, callback_data="back_to_main")]
             ]
         )
-        await callback.message.edit_text(text=text, reply_markup=markup)
+        await _edit_devices_screen(callback, text, markup)
         return
 
-    await callback.message.edit_text(
-        text=text,
-        reply_markup=keyboard_devices_list(slot_key, btn_rows),
+    await _edit_devices_screen(
+        callback,
+        text,
+        keyboard_devices_list(slot_key, btn_rows),
     )

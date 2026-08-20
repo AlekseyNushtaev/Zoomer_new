@@ -15,6 +15,7 @@ from config import (
     PAYMENT_MAX_PENDING_PER_USER,
     SHOP_ID_FREEKASSA,
 )
+from utils.menu_ui import edit_or_send_screen
 from keyboard import keyboard_payment_sbp, create_kb
 from lexicon import dct_price, dct_desc, lexicon
 from logging_config import logger
@@ -362,10 +363,6 @@ async def _handle_wata_style_callback(callback: CallbackQuery, ui_kind: UiKind) 
     if callback.from_user.id in ADMIN_IDS:
         rub_amount = 10 if ui_kind == "sbp" else 1
     user_id = str(callback.from_user.id)
-    white_flag = False
-    if "white" in duration:
-        duration = duration.replace("white_", "")
-        white_flag = True
     duration = normalize_tariff_duration_key(duration)
 
     if gift_flag:
@@ -374,7 +371,7 @@ async def _handle_wata_style_callback(callback: CallbackQuery, ui_kind: UiKind) 
             des=f"Подписка в подарок {dct_desc[desc_key]}",
             user_id=user_id,
             duration=duration,
-            white=white_flag,
+            white=False,
             ui_kind=ui_kind,
         )
     else:
@@ -383,7 +380,7 @@ async def _handle_wata_style_callback(callback: CallbackQuery, ui_kind: UiKind) 
             des=dct_desc[desc_key],
             user_id=user_id,
             duration=duration,
-            white=white_flag,
+            white=False,
             ui_kind=ui_kind,
         )
 
@@ -393,15 +390,14 @@ async def _handle_wata_style_callback(callback: CallbackQuery, ui_kind: UiKind) 
     if payment_info["status"] == "pending":
         try:
             text = lexicon["payment_link"].format(wl_bonus="")
-            if white_flag:
-                text = lexicon["payment_link_white"]
             if gift_flag:
                 text += "\n\nДля оплаты <b>подарочной подписки</b> перейдите по ссылке:"
             else:
                 text += "\n\nДля оплаты тарифа перейдите по ссылке:"
-            await callback.message.edit_text(
-                text=text,
-                reply_markup=keyboard_payment_sbp(btn, payment_info["url"]),
+            await edit_or_send_screen(
+                callback,
+                text,
+                keyboard_payment_sbp(btn, payment_info["url"]),
             )
             logger.info(
                 f"Юзер {user_id} создал {log_label} {_fk_amount_rub(str(rub_amount), ui_kind)} руб "

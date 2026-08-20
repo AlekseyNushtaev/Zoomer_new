@@ -181,6 +181,9 @@ class X3:
         db_user_id — Users.user_id (может быть отрицательным).
         """
         try:
+            if is_white:
+                logger.warning("add_client_site: white tariff disabled")
+                return False
             email_key = (email_norm or "").strip().lower()
             panel_username = panel_username_for_site_user(db_user_id, is_white)
             client_id = self.generate_site_short_uuid(email_key, is_white, db_user_id)
@@ -274,6 +277,9 @@ class X3:
         shortUuid и пароли — от panel_username + db_user_id.
         """
         try:
+            if is_white:
+                logger.warning("add_client_gift: white tariff disabled")
+                return False
             full_username = f"{panel_username}_white" if is_white else panel_username
             gift_key = (full_username or "").strip().lower()
             client_id = self.generate_site_short_uuid(gift_key, is_white, db_user_id)
@@ -392,24 +398,24 @@ class X3:
         """Добавляет нового клиента"""
         try:
             client_id = self.generate_client_id(user_id)
-            if 'white' in user_id_str:
-                client_id = self.generate_client_id(user_id * 100)
+            # if 'white' in user_id_str:
+            #     client_id = self.generate_client_id(user_id * 100)
             current_time = datetime.datetime.utcnow()
             expire_time = current_time + datetime.timedelta(days=day)
             vless_uuid = str(uuid.uuid1())
 
-            if 'white' in user_id_str:
-                squad = ['627fc165-7598-4517-8baa-72e1a4e4be37']
-                trafficLimitStrategy = "MONTH"
-                trafficLimitBytes = 80530636800
-                hwidDeviceLimit = 1
-            else:
-                squad_1 = ['2a2236d1-517b-4015-b961-eae22d2ef7fe']
-                squad_2 = ['889e0d7a-cfa6-4bf9-b2ed-3cb7a1b44cbd']
-                squad = random.choice([squad_1, squad_2])
-                trafficLimitStrategy = "NO_RESET"
-                trafficLimitBytes = 0
-                hwidDeviceLimit = 5
+            # if 'white' in user_id_str:
+            #     squad = ['627fc165-7598-4517-8baa-72e1a4e4be37']
+            #     trafficLimitStrategy = "MONTH"
+            #     trafficLimitBytes = 80530636800
+            #     hwidDeviceLimit = 1
+            # else:
+            squad_1 = ['2a2236d1-517b-4015-b961-eae22d2ef7fe']
+            squad_2 = ['889e0d7a-cfa6-4bf9-b2ed-3cb7a1b44cbd']
+            squad = random.choice([squad_1, squad_2])
+            trafficLimitStrategy = "NO_RESET"
+            trafficLimitBytes = 0
+            hwidDeviceLimit = 5
 
             data = {
                 "username": user_id_str,
@@ -447,23 +453,23 @@ class X3:
                         # Сервер мог не вернуть JSON, но статус успешный
                         logger.warning(f"Не удалось прочитать JSON при добавлении {user_id}: {e}. Считаем успехом.")
                         subscription_end_date = expire_time.replace(tzinfo=datetime.timezone.utc)
-                        if 'white' in user_id_str:
-                            await sql.update_white_subscription_end_date(user_id, subscription_end_date)
-                            await sql.update_white_subscription(user_id, client_id)
-                        else:
-                            await sql.update_subscription_end_date(user_id, subscription_end_date)
-                            await sql.update_subscribtion(user_id, client_id)
+                        # if 'white' in user_id_str:
+                        #     await sql.update_white_subscription_end_date(user_id, subscription_end_date)
+                        #     await sql.update_white_subscription(user_id, client_id)
+                        # else:
+                        await sql.update_subscription_end_date(user_id, subscription_end_date)
+                        await sql.update_subscribtion(user_id, client_id)
                         logger.info(f"✅ Клиент {user_id} успешно добавлен (без JSON)")
                         return True
                     else:
                         if response_data.get("success", True):
                             subscription_end_date = expire_time.replace(tzinfo=datetime.timezone.utc)
-                            if 'white' in user_id_str:
-                                await sql.update_white_subscription_end_date(user_id, subscription_end_date)
-                                await sql.update_white_subscription(user_id, client_id)
-                            else:
-                                await sql.update_subscription_end_date(user_id, subscription_end_date)
-                                await sql.update_subscribtion(user_id, client_id)
+                            # if 'white' in user_id_str:
+                            #     await sql.update_white_subscription_end_date(user_id, subscription_end_date)
+                            #     await sql.update_white_subscription(user_id, client_id)
+                            # else:
+                            await sql.update_subscription_end_date(user_id, subscription_end_date)
+                            await sql.update_subscribtion(user_id, client_id)
                             logger.info(f"✅ Клиент {user_id} успешно добавлен")
                             return True
                         else:
@@ -486,7 +492,10 @@ class X3:
         white_subscription: str,
         white_subscription_end_date: datetime.datetime,
     ) -> bool:
-        """POST /api/users для импорта white-клиента из БД (shortUuid и срок из полей white_*)."""
+        """White tariff отключён."""
+        logger.warning("create_white_user_import_panel: white tariff disabled (user_id=%s)", user_id)
+        return False
+        # --- white tariff (отключён) ---
         try:
             current_time = datetime.datetime.utcnow()
             expire_dt = white_subscription_end_date
@@ -680,18 +689,18 @@ class X3:
                         response_data = await response.json()
                     except (aiohttp.ClientConnectionError, aiohttp.ContentTypeError, ValueError) as e:
                         logger.warning(f"Не удалось прочитать JSON при обновлении {user_id}: {e}. Считаем успехом.")
-                        if 'white' in user_id_str:
-                            await sql.update_white_subscription_end_date(user_id, new_expire_at)
-                        else:
-                            await sql.update_subscription_end_date(user_id, new_expire_at)
+                        # if 'white' in user_id_str:
+                        #     await sql.update_white_subscription_end_date(user_id, new_expire_at)
+                        # else:
+                        await sql.update_subscription_end_date(user_id, new_expire_at)
                         logger.info(f"✅ Клиент {user_id} успешно обновлён (без JSON), добавлено {day} дней")
                         return True
                     else:
                         if response_data.get("success", True):
-                            if 'white' in user_id_str:
-                                await sql.update_white_subscription_end_date(user_id, new_expire_at)
-                            else:
-                                await sql.update_subscription_end_date(user_id, new_expire_at)
+                            # if 'white' in user_id_str:
+                            #     await sql.update_white_subscription_end_date(user_id, new_expire_at)
+                            # else:
+                            await sql.update_subscription_end_date(user_id, new_expire_at)
                             logger.info(f"✅ Клиент {user_id} успешно обновлён, добавлено {day} дней")
                             return True
                         else:
@@ -776,7 +785,7 @@ class X3:
 
     SUBSCRIPTION_SLOTS: Tuple[Tuple[str, str, str], ...] = (
         ("main", "", "💫 VPN PRO"),
-        ("white", "_white", "🦾 Включи мобильный интернет"),
+        # ("white", "_white", "🦾 Включи мобильный интернет"),
     )
 
     @staticmethod
@@ -1140,10 +1149,10 @@ class X3:
             return
         sql = AsyncSQL()
         try:
-            if str(username).endswith("_white"):
-                await sql.update_white_subscription(int(user_id), str(su))
-            else:
-                await sql.update_subscribtion(int(user_id), str(su))
+            # if str(username).endswith("_white"):
+            #     await sql.update_white_subscription(int(user_id), str(su))
+            # else:
+            await sql.update_subscribtion(int(user_id), str(su))
         except Exception as e:
             logger.warning("shortUuid → БД для {} (user_id={}): {}", username, user_id, e)
 

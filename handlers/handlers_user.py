@@ -4,14 +4,32 @@ from datetime import datetime, timezone
 from bot import sql, x3, bot
 from config import CHANEL_ID, PUBLIC_SITE_URL, PARTNER_PROCENT, PARTNER_MIN, SUPPORT_URL, BOT_URL
 from lead_tracker import post_user_registered, post_user_trial, tracker_source_from_ref_and_stamp
-from keyboard import (keyboard_start, keyboard_start_bonus, keyboard_tariff_bonus, keyboard_tariff,
-                      keyboard_subscription, keyboard_sub_after_free, ref_keyboard, keyboard_gift_tariff,
+from keyboard import (keyboard_start, keyboard_tariff_bonus, keyboard_tariff,
+                      keyboard_sub_after_free, ref_keyboard, keyboard_gift_tariff,
                       keyboard_payment_method, keyboard_payment_method_stock, chanel_keyboard, create_kb,
                       keyboard_inline_ref, keyboard_partner_intro, keyboard_partner_dashboard,
                       keyboard_partner_withdraw, keyboard_buy_menu, keyboard_earn_with_us,
-                      STYLE_PRIMARY, OPEN_SITE_CB, SITE_URL)
+                      STYLE_PRIMARY, OPEN_SITE_CB, SITE_URL,
+                      keyboard_trial_existing_expired, keyboard_subscription_manage,
+                      keyboard_about_service, ABOUT_SERVICE_CB, BTN_BACK)
+from utils.menu_ui import (
+    MAIN_MENU_BUTTON_TEXT,
+    edit_or_send_photo,
+    has_active_subscription,
+    menu_photo,
+    profile_caption,
+    send_main_menu_hint,
+    subscription_status_text,
+    sync_panel_user_to_db,
+    subscription_end_display,
+    trial_existing_active_caption,
+    trial_existing_expired_caption,
+    trial_success_caption,
+    show_connect_screen,
+)
 from web_api import create_bot_site_login_token
 from logging_config import logger
+from payments.tariff_gate import is_mobile_tariff_key
 import asyncio
 import re
 from aiogram import Router, F
@@ -39,15 +57,42 @@ _USER_TUPLE_SUBSCRIPTION_END_DATE = 9
 _USER_TUPLE_FIELD_BOOL_3 = 26
 
 
-def _user_has_active_pro_subscription(user_data: tuple) -> bool:
-    sub_end = user_data[_USER_TUPLE_SUBSCRIPTION_END_DATE]
-    if sub_end is None:
-        return False
-    if sub_end.tzinfo is None:
-        aware = sub_end.replace(tzinfo=timezone.utc)
+async def _show_main_menu(
+    source: Message | CallbackQuery,
+    *,
+    send_hint: bool = False,
+) -> None:
+    user = source.from_user
+    user_data = await sql.get_user(user.id)
+    fullname = user.full_name or user.first_name or "Пользователь"
+    caption = profile_caption(fullname, user_data)
+    in_panel = bool(user_data and user_data[4])
+    active = has_active_subscription(user_data)
+
+    if send_hint and isinstance(source, Message):
+        await send_main_menu_hint(source)
+
+    sub_url = await x3.sublink(str(user.id)) if active else None
+    kb = keyboard_start(
+        has_active_sub=active,
+        buy_primary=not active,
+        sub_url=sub_url or None,
+        show_trial=not in_panel,
+    )
+
+    if isinstance(source, CallbackQuery):
+        await edit_or_send_photo(source, "profile", caption, kb)
     else:
-        aware = sub_end.astimezone(timezone.utc)
-    return aware.date() >= datetime.now(timezone.utc).date()
+        await source.answer_photo(
+            photo=menu_photo("profile"),
+            caption=caption,
+            parse_mode="HTML",
+            reply_markup=kb,
+        )
+
+
+async def _show_connect_screen(callback: CallbackQuery) -> None:
+    await show_connect_screen(callback)
 
 
 async def _panel_regular_subscription_is_active(uid: int) -> bool:
@@ -215,14 +260,12 @@ async def process_start_command(message: Message, command: Command):
             await sql.update_ttclid(message.from_user.id, ttclid)
             logger.info(f'Юзеру {message.from_user.id} - {message.from_user.username} присвоен ttclid')
 
-    if not in_panel:
-        await message.answer(text=lexicon['start_bonus'],
-                             reply_markup=keyboard_start_bonus(message.from_user.id),
-                             disable_web_page_preview=True)
-    else:
-        await message.answer(text=lexicon['start'],
-                             reply_markup=keyboard_start(message.from_user.id),
-                             disable_web_page_preview=True)
+    await _show_main_menu(message, send_hint=True)
+
+
+@router.message(F.text == MAIN_MENU_BUTTON_TEXT)
+async def main_menu_reply_button(message: Message):
+    await _show_main_menu(message, send_hint=False)
 
 
 def _site_base_url() -> str:
@@ -254,32 +297,32 @@ async def open_site_callback(callback: CallbackQuery):
                 InlineKeyboardButton(
                     text="🌐 Открыть сайт",
                     url=login_url,
-                    style=STYLE_PRIMARY,
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="🔙 Назад",
+                    text=BTN_BACK,
                     callback_data="back_to_main",
                 )
             ],
         ]
     )
-    await callback.message.answer(
-        "🌐 Нажмите кнопку ниже — откроется сайт, вход выполнится автоматически.\n"
-        "Ссылка действует 10 минут и только один раз.",
-        reply_markup=kb,
-        disable_web_page_preview=True,
+    await edit_or_send_photo(
+        callback,
+        "our_site",
+        lexicon["site_login_hint"],
+        kb,
     )
 
 
 @router.callback_query(F.data == 'buy_vpn')
 async def buy_vpn_cb(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.answer(
-        text=lexicon['buy_menu'],
-        reply_markup=keyboard_buy_menu(),
-        disable_web_page_preview=True,
+    await edit_or_send_photo(
+        callback,
+        "buy_subscription",
+        lexicon['buy_menu'],
+        keyboard_buy_menu(),
     )
 
 
@@ -295,36 +338,22 @@ async def buy_vpn_self_cb(callback: CallbackQuery):
     result_active = await x3.activ(str(callback.from_user.id))
 
     if result_active['activ'] == '🔎 - Не подключён' and not in_panel:
-        await callback.message.answer(text=lexicon['buy'],
-                                      reply_markup=keyboard_tariff_bonus(),
-                                      disable_web_page_preview=True)
+        kb = keyboard_tariff_bonus()
     else:
-        await callback.message.answer(text=lexicon['buy'],
-                                      reply_markup=keyboard_tariff(),
-                                      disable_web_page_preview=True)
+        kb = keyboard_tariff()
+
+    await edit_or_send_photo(
+        callback,
+        "buy_subscription",
+        lexicon['buy'],
+        kb,
+    )
 
 
 @router.callback_query(F.data == 'connect_vpn')
 async def direct_connect_vpn_cb(callback: CallbackQuery):
-    # await x3.test_connect()
-    user_id = str(callback.from_user.id)
-    sub_url = await x3.sublink(user_id)
-    sub_url_white = None
-    user_data = await sql.get_user(callback.from_user.id)
-    if user_data[10]:
-        user_id_white = user_id + '_white'
-        sub_url_white = await x3.sublink(user_id_white)
-
-    if not sub_url and not sub_url_white:
-        await callback.message.answer(lexicon['no_sub'])
-        return
-
-    await callback.message.answer(
-        text=lexicon['to_sub'],
-        reply_markup=keyboard_subscription(sub_url, sub_url_white),
-        disable_web_page_preview=True
-    )
     await callback.answer()
+    await _show_connect_screen(callback)
 
 
 @router.callback_query(F.data == _TRIAL_RETURN_GET_CB)
@@ -382,80 +411,132 @@ async def secret_tariff_payment(callback: CallbackQuery):
         )
         return
     await callback.answer()
-    await callback.message.answer(
+    await edit_or_send_photo(
+        callback,
+        "buy_subscription",
         _SECRET_TARIFF_PAYMENT_TEXT,
-        reply_markup=keyboard_payment_method("r_30secret"),
+        keyboard_payment_method("r_30secret"),
     )
 
 
-@router.callback_query(F.data.in_({'r_7', 'r_30', 'r_90', 'r_180', 'r_365', 'r_120'}))
+@router.callback_query(F.data == 'r_120')
+async def process_payment_method_bonus(callback: CallbackQuery):
+    user_data = await sql.get_user(callback.from_user.id)
+    if user_data and user_data[8]:
+        await callback.answer()
+        await callback.message.answer(
+            'Акция действительна только при первой оплате.',
+            reply_markup=create_kb(1, back_to_main='🔙 Назад'),
+        )
+        return
+    await callback.answer()
+    tariff = callback.data
+    await callback.message.answer(
+        'Выберите метод оплаты акционной подписки:',
+        reply_markup=keyboard_payment_method_stock(tariff),
+    )
+
+
+@router.callback_query(F.data.in_({'r_7', 'r_30', 'r_90', 'r_180', 'r_365'}))
 async def process_payment_method(callback: CallbackQuery):
     await callback.answer()
     tariff = callback.data
     duration = int(tariff.replace('r_', ''))
     text = format_pro_payment_link(duration)
     text += '\n\nВыберите способ оплаты:'
-    await callback.message.answer(text, reply_markup=keyboard_payment_method(tariff))
-
-
-@router.callback_query(F.data.in_({'r_white_30', 'gift_r_white_30'}))
-async def mobile_tariff_purchase_disabled(callback: CallbackQuery):
-    await callback.answer(lexicon['mobile_purchase_disabled'], show_alert=True)
+    await edit_or_send_photo(
+        callback,
+        "buy_subscription",
+        text,
+        keyboard_payment_method(tariff),
+    )
 
 
 @router.callback_query(F.data == 'free_vpn')
 async def free_vpn_cb(callback: CallbackQuery):
     day = 1
+    uid = callback.from_user.id
 
-    user_data = await sql.get_user(callback.from_user.id)
-    in_panel = False
-    if user_data is not None and len(user_data) > 4:
-        in_panel = user_data[4]
+    user_data = await sql.get_user(uid)
+    in_panel = bool(user_data and len(user_data) > 4 and user_data[4])
     if in_panel:
-        await callback.message.answer(text=lexicon['free_vpn_no'],
-                                      reply_markup=keyboard_start(callback.from_user.id))
+        await callback.answer()
+        await _show_main_menu(callback)
         return
-    # Проверка на наличие данных
-    # await x3.test_connect()
-    logger.info(await x3.addClient(day, str(callback.from_user.id), int(callback.from_user.id)))
-    result_active = await x3.activ(str(callback.from_user.id))
-    time = result_active['time']
 
-    # Проверка на наличие данных
-    if await sql.get_user(callback.from_user.id) is not None:
-        await sql.update_in_panel(callback.from_user.id)
+    ok = await x3.addClient(day, str(uid), uid)
+    if not ok:
+        synced = await sync_panel_user_to_db(uid)
+        if not synced:
+            await callback.answer(
+                "Не удалось активировать тест. Попробуйте позже или напишите в поддержку.",
+                show_alert=True,
+            )
+            return
+
+        user_data = await sql.get_user(uid)
+        sub_url = await x3.sublink(str(uid))
+        if has_active_subscription(user_data):
+            end_time = await subscription_end_display(uid)
+            caption = trial_existing_active_caption(end_time, sub_url)
+            kb = keyboard_subscription_manage(sub_url)
+        else:
+            status = subscription_status_text(user_data)
+            expired_date = status.replace("Истекла ", "")
+            caption = trial_existing_expired_caption(expired_date)
+            kb = keyboard_trial_existing_expired()
+        await callback.answer()
+        await edit_or_send_photo(callback, "subscription_manage", caption, kb)
+        return
+
+    if await sql.get_user(uid) is not None:
+        await sql.update_in_panel(uid)
     else:
-        await sql.add_user(callback.from_user.id, True)
-    await sql.init_wl_trial_limits(callback.from_user.id)
-    user_id = str(callback.from_user.id)
-    sub_url = await x3.sublink(user_id)
+        await sql.add_user(uid, True)
+    await sql.init_wl_trial_limits(uid)
 
-    await callback.message.answer(text=lexicon['buy_success'].format(time, sub_url),
-                                  reply_markup=keyboard_sub_after_free(sub_url),
-                                  disable_web_page_preview=True)
-    await asyncio.sleep(1)
-    await callback.message.answer(lexicon['to_chanel'], reply_markup=chanel_keyboard())
-    await post_user_trial(callback.from_user.id)
+    sub_url = await x3.sublink(str(uid))
+    end_time = await subscription_end_display(uid)
     await callback.answer()
+    await edit_or_send_photo(
+        callback,
+        "subscription_manage",
+        trial_success_caption(end_time, sub_url),
+        keyboard_subscription_manage(sub_url),
+    )
+    await post_user_trial(uid)
 
 
 @router.callback_query(F.data == 'earn_with_us')
 async def earn_with_us_cb(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.answer(
-        text=lexicon['earn_menu'],
-        reply_markup=keyboard_earn_with_us(),
-        disable_web_page_preview=True,
+    await edit_or_send_photo(
+        callback,
+        "earn_with_us",
+        lexicon['earn_menu'],
+        keyboard_earn_with_us(),
+    )
+
+
+@router.callback_query(F.data == ABOUT_SERVICE_CB)
+async def about_service_cb(callback: CallbackQuery):
+    await callback.answer()
+    await edit_or_send_photo(
+        callback,
+        "about_service",
+        lexicon['about_service'],
+        keyboard_about_service(),
     )
 
 
 @router.callback_query(F.data == 'back_to_earn')
 async def back_to_earn_cb(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.answer(
-        text=lexicon['earn_menu'],
-        reply_markup=keyboard_earn_with_us(),
-        disable_web_page_preview=True,
+    await edit_or_send_photo(
+        callback,
+        "earn_with_us",
+        lexicon['earn_menu'],
+        keyboard_earn_with_us(),
     )
 
 
@@ -463,10 +544,11 @@ async def back_to_earn_cb(callback: CallbackQuery):
 async def referral_program(callback: CallbackQuery):
     await callback.answer()
     count = await sql.select_ref_count(int(callback.from_user.id))
-    await callback.message.answer(
-        text=lexicon['ref_info'].format(count, callback.from_user.id),
-        reply_markup=ref_keyboard(callback.from_user.id),
-        disable_web_page_preview=True
+    await edit_or_send_photo(
+        callback,
+        "earn_with_us",
+        lexicon['ref_info'].format(count, callback.from_user.id),
+        ref_keyboard(callback.from_user.id),
     )
 
 
@@ -489,8 +571,10 @@ async def _send_partner_dashboard(callback: CallbackQuery) -> None:
     total_earned = balance + paid_out
     link = f"{BOT_URL}?start=partner_{tg_id}"
 
-    await callback.message.answer(
-        text=lexicon['partner_dashboard'].format(
+    await edit_or_send_photo(
+        callback,
+        "earn_with_us",
+        lexicon['partner_dashboard'].format(
             link=link,
             procent=PARTNER_PROCENT,
             referrals=referrals,
@@ -499,8 +583,7 @@ async def _send_partner_dashboard(callback: CallbackQuery) -> None:
             paid_out=paid_out,
             balance=balance,
         ),
-        reply_markup=keyboard_partner_dashboard(),
-        disable_web_page_preview=True,
+        keyboard_partner_dashboard(),
     )
 
 
@@ -513,12 +596,14 @@ async def partner_program(callback: CallbackQuery):
     if user and user.partner_flag:
         await _send_partner_dashboard(callback)
     else:
-        await callback.message.answer(
-            text=lexicon['partner_intro'].format(
+        await edit_or_send_photo(
+            callback,
+            "earn_with_us",
+            lexicon['partner_intro'].format(
                 procent=PARTNER_PROCENT,
                 min_sum=PARTNER_MIN,
             ),
-            reply_markup=keyboard_partner_intro(),
+            keyboard_partner_intro(),
         )
 
 
@@ -546,12 +631,14 @@ async def partner_withdraw(callback: CallbackQuery):
         return
 
     await callback.answer()
-    await callback.message.answer(
-        text=lexicon['partner_withdraw_info'].format(
+    await edit_or_send_photo(
+        callback,
+        "earn_with_us",
+        lexicon['partner_withdraw_info'].format(
             balance=balance,
             min_sum=PARTNER_MIN,
         ),
-        reply_markup=keyboard_partner_withdraw(SUPPORT_URL),
+        keyboard_partner_withdraw(SUPPORT_URL),
     )
 
 
@@ -559,9 +646,11 @@ async def partner_withdraw(callback: CallbackQuery):
 async def gift_subscription_start(callback: CallbackQuery):
     await callback.answer()
     """Начало процесса подарка подписки"""
-    await callback.message.answer(
+    await edit_or_send_photo(
+        callback,
+        "buy_subscription",
         lexicon['gift_start'],
-        reply_markup=keyboard_gift_tariff()
+        keyboard_gift_tariff(),
     )
 
 
@@ -570,7 +659,7 @@ async def process_gift_payment_method(callback: CallbackQuery):
     if callback.data == 'gift_r_5000':
         await callback.answer()
         return
-    if 'white' in callback.data:
+    if is_mobile_tariff_key(callback.data):
         await callback.answer(lexicon['mobile_purchase_disabled'], show_alert=True)
         return
     await callback.answer()
@@ -578,7 +667,12 @@ async def process_gift_payment_method(callback: CallbackQuery):
     duration = int(tariff.replace('gift_r_', ''))
     text = format_pro_payment_link(duration)
     text += '\n\nВыберите способ оплаты <b>подарочной подписки</b>:'
-    await callback.message.answer(text, reply_markup=keyboard_payment_method(tariff))
+    await edit_or_send_photo(
+        callback,
+        "buy_subscription",
+        text,
+        keyboard_payment_method(tariff),
+    )
 
 
 async def activate_gift(message: Message, gift_id: str):
@@ -595,14 +689,9 @@ async def activate_gift(message: Message, gift_id: str):
         return False
 
     duration = result[1]
-    white_flag = result[2]
 
-    # Активируем подписку для получателя
-    # await x3.test_connect()
     user_id = message.from_user.id
     user_id_str = str(message.from_user.id)
-    if white_flag:
-        user_id_str += '_white'
 
     # Важно: `x3.addClient/updateClient` проставляет end_date в БД через UPDATE.
     # Для нового пользователя строка в `users` еще не создана, поэтому UPDATE ничего не меняет.
@@ -627,12 +716,11 @@ async def activate_gift(message: Message, gift_id: str):
 
         # Обновляем базу данных
         await sql.update_in_panel(message.from_user.id)
-        if not white_flag:
-            await credit_wl_subscription_bonus(sql, message.from_user.id, int(duration))
-            from wl_traffic.service import fetch_panel_user, reassign_to_active_squad, user_on_limited_squad
-            panel_user = await fetch_panel_user(x3, message.from_user.id, sql=sql)
-            if panel_user and user_on_limited_squad(panel_user):
-                await reassign_to_active_squad(x3, panel_user)
+        await credit_wl_subscription_bonus(sql, message.from_user.id, int(duration))
+        from wl_traffic.service import fetch_panel_user, reassign_to_active_squad, user_on_limited_squad
+        panel_user = await fetch_panel_user(x3, message.from_user.id, sql=sql)
+        if panel_user and user_on_limited_squad(panel_user):
+            await reassign_to_active_squad(x3, panel_user)
         if was_in_db:
             logger.info(
                 f'Юзер {message.from_user.id} - {message.from_user.username} получил в подарок подписку, уже был в БД')
@@ -662,25 +750,31 @@ async def video_faq(callback: CallbackQuery):
 async def handle_back_to_buy_menu(callback: CallbackQuery):
     """Возврат в меню покупки подписки."""
     await callback.answer()
-    await callback.message.answer(
-        text=lexicon['buy_menu'],
-        reply_markup=keyboard_buy_menu(),
-        disable_web_page_preview=True,
+    await edit_or_send_photo(
+        callback,
+        "buy_subscription",
+        lexicon['buy_menu'],
+        keyboard_buy_menu(),
     )
 
 
 @router.callback_query(F.data == 'back_to_main')
 async def handle_back_to_menu(callback: CallbackQuery):
-    """Обработчик для возврата в главное меню из оплаты"""
-    await callback.message.answer(text=lexicon['start'],
-                                  reply_markup=keyboard_start(callback.from_user.id),
-                                  disable_web_page_preview=True)
+    """Обработчик для возврата в главное меню."""
+    await callback.answer()
+    await _show_main_menu(callback)
 
 
 @router.callback_query(F.data == 'back_to_gift_menu')
 async def handle_back_to_gift_menu(callback: CallbackQuery):
     """Обработчик для возврата в меню подарка подписки."""
-    await callback.message.edit_text(text=lexicon['gift_start'], reply_markup=keyboard_gift_tariff())
+    await callback.answer()
+    await edit_or_send_photo(
+        callback,
+        "buy_subscription",
+        lexicon['gift_start'],
+        keyboard_gift_tariff(),
+    )
 
 
 @router.my_chat_member(ChatMemberUpdatedFilter(member_status_changed=KICKED))
@@ -693,16 +787,6 @@ async def user_blocked_bot(event: ChatMemberUpdated):
 async def user_unblocked_bot(event: ChatMemberUpdated):
     await sql.update_delete(event.from_user.id, False)
     logger.success(f'Юзер {event.from_user.id} разблокировал бота')
-
-
-@router.callback_query(F.data == 'r_120')
-async def process_payment_method_bonus(callback: CallbackQuery):
-    user_data = await sql.get_user(callback.from_user.id)
-    if user_data[8]:
-        await callback.message.answer('Акция действительна только при первой оплате.',
-                                      reply_markup=create_kb(1, back_to_main='🔙 Назад'))
-    tariff = callback.data
-    await callback.message.answer('Выберите метод оплаты акционной подписки:', reply_markup=keyboard_payment_method_stock(tariff))
 
 
 @router.chat_member()

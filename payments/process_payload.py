@@ -114,15 +114,12 @@ async def _resolve_buyer_for_payment(
             site_em = email_norm
         else:
             site_em = None
-            if white_flag:
-                user_id_str = panel_base + "_white"
-            else:
-                user_id_str = panel_base
+            user_id_str = panel_base
 
         return user_id_str, db_uid, notify_tg, use_site, site_em
 
     db_uid = int(raw)
-    user_id_str = str(db_uid) + ("_white" if white_flag else "")
+    user_id_str = str(db_uid)
     return user_id_str, db_uid, db_uid, False, None
 
 
@@ -232,6 +229,9 @@ async def process_confirmed_payment(payload) -> bool:
             logger.error("Платёж: некорректный duration в payload: {}", raw_duration)
             return False
         white_flag = payload_parts.get("white", "False") == "True"
+        if white_flag:
+            logger.error("White tariff отключён, платёж отклонён")
+            return False
         is_gift = payload_parts.get("gift", "False") == "True"
         method = payload_parts.get("method", "")
         if method in ("sbp", "stars", "card", "crypto", "cryptobot", "wata_sbp", "wata_card", "fk_sbp", "fk_card", "fksbp"):

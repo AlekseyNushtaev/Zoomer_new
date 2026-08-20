@@ -4,6 +4,7 @@ from keyboard import keyboard_payment_stars
 from logging_config import logger
 
 from aiogram import Router, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, LabeledPrice, PreCheckoutQuery, Message
 from lexicon import lexicon
 from payments.payload_source import BOT
@@ -36,7 +37,6 @@ def get_stars_amount(currency: str, duration: str) -> float:
 @router.callback_query(F.data.startswith('stars_'))
 async def process_payment_stars(callback: CallbackQuery):
     gift_flag = False
-    white_flag = False
     if 'gift_' in callback.data:
         gift_flag = True
     duration = callback.data.replace('stars_r_', '').replace('stars_gift_r_', '')
@@ -50,13 +50,10 @@ async def process_payment_stars(callback: CallbackQuery):
         stars_amount = 1
     user_id = str(callback.from_user.id)
 
-    if 'white' in duration:
-        duration = duration.replace('white_', '')
-        white_flag = True
     duration = normalize_tariff_duration_key(duration)
 
     payload = (
-        f"user_id:{user_id},duration:{duration},white:{white_flag},gift:{gift_flag},"
+        f"user_id:{user_id},duration:{duration},white:False,gift:{gift_flag},"
         f"method:stars,amount:{stars_amount},source:{BOT}"
     )
 
@@ -65,7 +62,14 @@ async def process_payment_stars(callback: CallbackQuery):
     if duration in ("5000", "5000sale"):
         dur_label = "Навсегда"
     title = f"Оплата подписки {'в подарок другу ' if gift_flag else ''}на {dur_label} дней."
-    description = lexicon['payment_link_white'] if white_flag else lexicon['payment_link'].format(wl_bonus="")
+    description = lexicon['payment_link'].format(wl_bonus="")
+
+    await callback.answer()
+    try:
+        await callback.message.delete()
+    except TelegramBadRequest:
+        pass
+
     await bot.send_invoice(
         callback.from_user.id,
         title=title,

@@ -5,7 +5,8 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQu
 
 from bot import sql
 from config import CRYPTOBOT_API_TOKEN, ADMIN_IDS, PAYMENT_MAX_PENDING_PER_USER
-from keyboard import create_kb, STYLE_SUCCESS
+from utils.menu_ui import edit_or_send_screen
+from keyboard import create_kb
 from lexicon import lexicon, dct_price, dct_desc
 from logging_config import logger
 from payments.payment_limits import payment_creation_allowed
@@ -145,7 +146,6 @@ async def create_cryptobot_payment(
 async def process_payment_crypto(callback: CallbackQuery):
     await callback.answer()
     gift_flag = False
-    white_flag = False
     data = callback.data
     user_id = callback.from_user.id
 
@@ -163,12 +163,7 @@ async def process_payment_crypto(callback: CallbackQuery):
 
     rub_amount = dct_price[duration_key]
     desc_key = duration_key
-
-    if 'white' in duration_key:
-        white_flag = True
-        duration = duration_key.replace('white_', '')
-    else:
-        duration = normalize_tariff_duration_key(duration_key)
+    duration = normalize_tariff_duration_key(duration_key)
 
     if callback.from_user.id in ADMIN_IDS:
         rub_amount = 1
@@ -183,14 +178,14 @@ async def process_payment_crypto(callback: CallbackQuery):
         description=description,
         user_id=user_id,
         duration=duration,
-        white=white_flag,
+        white=False,
         is_gift=gift_flag,
         telegram_username=callback.from_user.username,
         payload_source=BOT,
     )
 
     if result['status'] == 'pending':
-        text = lexicon['payment_link_white'] if white_flag else lexicon['payment_link'].format(wl_bonus="")
+        text = lexicon['payment_link'].format(wl_bonus="")
         if gift_flag:
             text += '\n\nДля оплаты <b>подарочной подписки</b> перейдите по ссылке:'
         else:
@@ -199,10 +194,9 @@ async def process_payment_crypto(callback: CallbackQuery):
             [InlineKeyboardButton(
                 text=f"💎 Оплатить криптовалютой ({rub_amount} ₽)",
                 url=result['url'],
-                style=STYLE_SUCCESS,
             )]
         ])
-        await callback.message.edit_text(text, reply_markup=pay_keyboard)
+        await edit_or_send_screen(callback, text, pay_keyboard)
         logger.info(f"Юзер {user_id} создал счет в Cryptobot на {rub_amount} руб {'(подарок)' if gift_flag else ''}")
     elif result.get("status") == "rate_limited":
         await callback.message.answer(

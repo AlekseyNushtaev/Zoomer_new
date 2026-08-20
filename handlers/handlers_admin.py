@@ -1185,59 +1185,10 @@ async def shortuuid_export_command(message: Message):
 
 @router.message(Command("import_panel_white"))
 async def import_panel_white_command(message: Message):
-    """Для всех с непустым white_subscription_end_date: создать white-клиента в панели из БД."""
+    """White tariff отключён."""
     if message.from_user.id not in ADMIN_IDS:
         return
-
-    await message.answer("🔄 Выбираю пользователей и создаю записи white в панели…")
-
-    try:
-        async with sql.session_factory() as session:
-            stmt = select(
-                Users.user_id,
-                Users.white_subscription_end_date,
-                Users.white_subscription,
-            ).where(Users.white_subscription_end_date.isnot(None))
-            result = await session.execute(stmt)
-            rows = result.all()
-
-        ok = 0
-        fail = 0
-        skipped_no_short = 0
-
-        for row in rows:
-            uid = int(row[0])
-            end_dt = row[1]
-            short_u = row[2]
-            if not (short_u or "").strip():
-                skipped_no_short += 1
-                continue
-            await asyncio.sleep(0.12)
-            if await x3.create_white_user_import_panel(uid, short_u, end_dt):
-                ok += 1
-            else:
-                fail += 1
-
-        report = (
-            f"✅ Готово.\n"
-            f"📋 В выборке (white_subscription_end_date не NULL): {len(rows)}\n"
-            f"✔ Создано в панели: {ok}\n"
-            f"❌ Ошибок: {fail}\n"
-            f"⏭ Пропущено (пустой white_subscription): {skipped_no_short}"
-        )
-        await message.answer(report)
-        logger.info(
-            "Админ %s /import_panel_white: выборка=%s ok=%s fail=%s skip_short=%s",
-            message.from_user.id,
-            len(rows),
-            ok,
-            fail,
-            skipped_no_short,
-        )
-
-    except Exception as e:
-        logger.exception("Ошибка в /import_panel_white")
-        await message.answer(f"❌ Ошибка: {str(e)}")
+    await message.answer("❌ Тариф «Включи мобильный интернет» (white) отключён.")
 
 
 @router.message(Command("import_panel_active"))

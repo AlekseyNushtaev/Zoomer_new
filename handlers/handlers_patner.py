@@ -12,7 +12,8 @@ from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKe
 from bot import bot
 from config import ADMIN_PARTNER_IDS, BOT_URL
 from config_bd.partner_apps import PartnerAppSQL
-from keyboard import STYLE_PRIMARY, STYLE_SUCCESS, STYLE_DANGER, BTN_BACK, keyboard_earn_with_us
+from keyboard import BTN_BACK, keyboard_earn_with_us
+from utils.menu_ui import edit_or_send_photo
 from lexicon import lexicon
 from logging_config import logger
 from services.managed_bot_setup import strip_managed_bot_profile
@@ -81,12 +82,10 @@ def _partner_create_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(
             text="Создать автоматически",
             url=_managed_bot_create_url(),
-            style=STYLE_SUCCESS,
         )],
         [InlineKeyboardButton(
             text="Подключить токен в ручную",
             callback_data="partner_manual_token",
-            style=STYLE_PRIMARY,
         )],
         [InlineKeyboardButton(
             text=BTN_BACK,
@@ -101,15 +100,18 @@ def _partner_manual_token_kb() -> InlineKeyboardMarkup:
     ])
 
 
-async def _show_partner_create_menu(message: Message, user: User) -> None:
+async def _show_partner_create_menu(callback: CallbackQuery) -> None:
+    user = callback.from_user
     await ensure_partner_draft_application(
         partner_tg_id=user.id,
         partner_username=user.username,
         partner_first_name=user.first_name,
     )
-    await message.answer(
+    await edit_or_send_photo(
+        callback,
+        "earn_with_us",
         PARTNER_CREATE_MENU_TEXT,
-        reply_markup=_partner_create_menu_kb(),
+        _partner_create_menu_kb(),
     )
 
 
@@ -135,10 +137,10 @@ async def _safe_edit_message(chat_id: int, message_id: int, text: str, **kwargs)
 
 def _admin_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📋 Заявки на модерации", callback_data="pa_list_pending", style=STYLE_PRIMARY)],
-        [InlineKeyboardButton(text="✅ Активные боты", callback_data="pa_list_active", style=STYLE_SUCCESS)],
-        [InlineKeyboardButton(text="⏸ Остановленные", callback_data="pa_list_stopped", style=STYLE_PRIMARY)],
-        #[InlineKeyboardButton(text="🗑 Удалить всех ботов", callback_data="pa_delete_all", style=STYLE_DANGER)],
+        [InlineKeyboardButton(text="📋 Заявки на модерации", callback_data="pa_list_pending")],
+        [InlineKeyboardButton(text="✅ Активные боты", callback_data="pa_list_active")],
+        [InlineKeyboardButton(text="⏸ Остановленные", callback_data="pa_list_stopped")],
+        #[InlineKeyboardButton(text="🗑 Удалить всех ботов", callback_data="pa_delete_all")],
     ])
 
 
@@ -213,7 +215,6 @@ async def _build_pa_list_view(section: str, page: int) -> tuple[str, InlineKeybo
         [InlineKeyboardButton(
             text=f"#{app.id} @{app.bot_username}",
             callback_data=f"pa_view_{app.id}",
-            style=STYLE_PRIMARY,
         )]
         for app in page_apps
     ]
@@ -239,8 +240,8 @@ async def _build_pa_list_view(section: str, page: int) -> tuple[str, InlineKeybo
 def _delete_all_confirm_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Да, удалить всех", callback_data="pa_delete_all_yes", style=STYLE_DANGER),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="pa_menu", style=STYLE_PRIMARY),
+            InlineKeyboardButton(text="✅ Да, удалить всех", callback_data="pa_delete_all_yes"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="pa_menu"),
         ],
     ])
 
@@ -255,22 +256,22 @@ def _app_card_kb(app_id: int, status: str) -> InlineKeyboardMarkup:
     rows = []
     if status == "pending":
         rows.append([
-            InlineKeyboardButton(text="✅ Одобрить", callback_data=f"pa_approve_{app_id}", style=STYLE_SUCCESS),
-            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"pa_reject_{app_id}", style=STYLE_DANGER),
+            InlineKeyboardButton(text="✅ Одобрить", callback_data=f"pa_approve_{app_id}"),
+            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"pa_reject_{app_id}"),
         ])
     elif status == "deploying":
         pass
     elif status == "active":
-        rows.append([InlineKeyboardButton(text="⏹ Остановить", callback_data=f"pa_stop_{app_id}", style=STYLE_DANGER)])
+        rows.append([InlineKeyboardButton(text="⏹ Остановить", callback_data=f"pa_stop_{app_id}")])
     elif status == "stopped":
-        rows.append([InlineKeyboardButton(text="▶️ Запустить", callback_data=f"pa_start_{app_id}", style=STYLE_SUCCESS)])
+        rows.append([InlineKeyboardButton(text="▶️ Запустить", callback_data=f"pa_start_{app_id}")])
     rows.append([InlineKeyboardButton(text="🔙 К меню", callback_data="pa_menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _stop_message_kb(app_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Не писать", callback_data=f"pa_stop_skip_{app_id}", style=STYLE_PRIMARY)],
+        [InlineKeyboardButton(text="Не писать", callback_data=f"pa_stop_skip_{app_id}")],
     ])
 
 
@@ -510,46 +511,39 @@ async def _run_partner_deploy(
 @router.callback_query(F.data == "create_partner_bot")
 async def create_partner_bot_start(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await _show_partner_create_menu(callback.message, callback.from_user)
     await callback.answer()
+    await _show_partner_create_menu(callback)
 
 
 @router.callback_query(F.data == "partner_manual_token")
 async def partner_manual_token(callback: CallbackQuery, state: FSMContext):
     await state.set_state(PartnerApplyFSM.waiting_token)
-    await _safe_edit_text(
-        callback.message,
-        PARTNER_MANUAL_TOKEN_TEXT,
-        reply_markup=_partner_manual_token_kb(),
-    )
     await callback.answer()
+    await edit_or_send_photo(
+        callback,
+        "earn_with_us",
+        PARTNER_MANUAL_TOKEN_TEXT,
+        _partner_manual_token_kb(),
+    )
 
 
 @router.callback_query(F.data == "partner_back_create_menu")
 async def partner_back_create_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await ensure_partner_draft_application(
-        partner_tg_id=callback.from_user.id,
-        partner_username=callback.from_user.username,
-        partner_first_name=callback.from_user.first_name,
-    )
-    await _safe_edit_text(
-        callback.message,
-        PARTNER_CREATE_MENU_TEXT,
-        reply_markup=_partner_create_menu_kb(),
-    )
     await callback.answer()
+    await _show_partner_create_menu(callback)
 
 
 @router.callback_query(F.data == "partner_back_main")
 async def partner_back_main(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await _safe_edit_text(
-        callback.message,
-        lexicon["earn_menu"],
-        reply_markup=keyboard_earn_with_us(),
-    )
     await callback.answer()
+    await edit_or_send_photo(
+        callback,
+        "earn_with_us",
+        lexicon["earn_menu"],
+        keyboard_earn_with_us(),
+    )
 
 
 @router.callback_query(F.data == "cancel_partner_apply")
@@ -557,66 +551,66 @@ async def cancel_partner_apply(callback: CallbackQuery, state: FSMContext):
     await partner_back_create_menu(callback, state)
 
 
-@router.managed_bot()
-async def partner_managed_bot_created(event, event_from_user: User):
-    creator = event.user
-    managed_bot_user = event.bot_user
-    if not creator:
-        logger.warning("partner managed_bot: missing creator user")
-        return
+# @router.managed_bot()
+# async def partner_managed_bot_created(event, event_from_user: User):
+#     creator = event.user
+#     managed_bot_user = event.bot_user
+#     if not creator:
+#         logger.warning("partner managed_bot: missing creator user")
+#         return
 
-    try:
-        token = await bot.get_managed_bot_token(user_id=managed_bot_user.id)
-    except Exception as e:
-        logger.exception("partner managed_bot get token failed: bot_id={} err={}", managed_bot_user.id, e)
-        try:
-            await bot.send_message(
-                creator.id,
-                "❌ Не удалось получить токен созданного бота. Попробуйте ещё раз или подключите токен вручную.",
-            )
-        except Exception:
-            pass
-        return
+#     try:
+#         token = await bot.get_managed_bot_token(user_id=managed_bot_user.id)
+#     except Exception as e:
+#         logger.exception("partner managed_bot get token failed: bot_id={} err={}", managed_bot_user.id, e)
+#         try:
+#             await bot.send_message(
+#                 creator.id,
+#                 "❌ Не удалось получить токен созданного бота. Попробуйте ещё раз или подключите токен вручную.",
+#             )
+#         except Exception:
+#             pass
+#         return
 
-    try:
-        await strip_managed_bot_profile(token)
-    except Exception as e:
-        logger.warning("partner managed_bot profile strip failed: bot_id={} err={}", managed_bot_user.id, e)
+#     try:
+#         await strip_managed_bot_profile(token)
+#     except Exception as e:
+#         logger.warning("partner managed_bot profile strip failed: bot_id={} err={}", managed_bot_user.id, e)
 
-    app, err = await submit_managed_partner_application(
-        partner_tg_id=creator.id,
-        partner_username=creator.username,
-        partner_first_name=creator.first_name,
-        token=token,
-    )
-    if err:
-        logger.warning(
-            "partner managed_bot application failed: partner_tg_id={} bot=@{} err={}",
-            creator.id,
-            managed_bot_user.username,
-            err,
-        )
-        try:
-            await bot.send_message(creator.id, f"❌ {err}")
-        except Exception:
-            pass
-        return
+#     app, err = await submit_managed_partner_application(
+#         partner_tg_id=creator.id,
+#         partner_username=creator.username,
+#         partner_first_name=creator.first_name,
+#         token=token,
+#     )
+#     if err:
+#         logger.warning(
+#             "partner managed_bot application failed: partner_tg_id={} bot=@{} err={}",
+#             creator.id,
+#             managed_bot_user.username,
+#             err,
+#         )
+#         try:
+#             await bot.send_message(creator.id, f"❌ {err}")
+#         except Exception:
+#             pass
+#         return
 
-    try:
-        await bot.send_message(
-            creator.id,
-            "✅ Заявка отправлена на модерацию. Мы уведомим вас после проверки.",
-        )
-    except Exception as e:
-        logger.error("partner managed_bot notify partner failed: {}", e)
+#     try:
+#         await bot.send_message(
+#             creator.id,
+#             "✅ Заявка отправлена на модерацию. Мы уведомим вас после проверки.",
+#         )
+#     except Exception as e:
+#         logger.error("partner managed_bot notify partner failed: {}", e)
 
-    await notify_admins_new_application(creator.id, app.id)
-    logger.info(
-        "partner managed_bot application created: app_id={} partner_tg_id={} bot=@{}",
-        app.id,
-        creator.id,
-        app.bot_username,
-    )
+#     await notify_admins_new_application(creator.id, app.id)
+#     logger.info(
+#         "partner managed_bot application created: app_id={} partner_tg_id={} bot=@{}",
+#         app.id,
+#         creator.id,
+#         app.bot_username,
+#     )
 
 
 @router.message(PartnerApplyFSM.waiting_token)

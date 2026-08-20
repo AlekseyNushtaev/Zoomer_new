@@ -63,30 +63,29 @@ def _keyboard_for(stage: PushStage):
     if stage.keyboard == 'free_green':
         return create_kb(
             1,
-            styles={'free_vpn': STYLE_SUCCESS},
             free_vpn='🔥 Попробовать бесплатно',
         )
     if stage.keyboard == 'buy_free':
         return create_kb(
             1,
-            styles={'buy_vpn': STYLE_PRIMARY, 'free_vpn': STYLE_SUCCESS},
+            styles={'buy_vpn': STYLE_PRIMARY},
             buy_vpn='💰 Купить подписку',
             free_vpn='🔥 Попробовать бесплатно',
         )
     if stage.keyboard == 'buy_free_secret':
         return create_kb(
             1,
-            styles={
-                'buy_vpn': STYLE_PRIMARY,
-                'free_vpn': STYLE_SUCCESS,
-                'r_30secret': STYLE_SUCCESS,
-            },
+            styles={'buy_vpn': STYLE_PRIMARY},
             buy_vpn='💰 Купить подписку',
             free_vpn='🔥 Попробовать бесплатно',
             r_30secret='💰 Секретный тариф',
         )
     if stage.keyboard == 'connect_only':
-        return create_kb(1, connect_vpn='🔗 Подключить VPN')
+        return create_kb(
+            1,
+            styles={'connect_vpn': STYLE_PRIMARY},
+            connect_vpn='🔗 Подключить VPN',
+        )
     return None
 
 

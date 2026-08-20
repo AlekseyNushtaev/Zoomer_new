@@ -6,12 +6,13 @@ from aiogram.types import CallbackQuery
 
 from bot import sql
 from config import PLATEGA_API_KEY, PLATEGA_MERCHANT_ID, ADMIN_IDS, PAYMENT_MAX_PENDING_PER_USER
+from utils.menu_ui import edit_or_send_screen
 from keyboard import keyboard_payment_sbp, create_kb
 from lexicon import dct_price, dct_desc, lexicon
 from logging_config import logger
 from payments.payment_limits import payment_creation_allowed
 from payments.payload_source import BOT
-from payments.tariff_gate import normalize_tariff_duration_key
+from payments.tariff_gate import is_mobile_tariff_key, normalize_tariff_duration_key
 
 router = Router()
 
@@ -210,10 +211,14 @@ async def pay_for_gift(
 async def process_payment_sbp(callback: CallbackQuery):
     await callback.answer()
     gift_flag = False
-    white_flag = False
     if 'gift_' in callback.data:
         gift_flag = True
     duration = callback.data.replace('sbp_r_', '').replace('sbp_gift_r_', '')
+
+    if is_mobile_tariff_key(duration):
+        await callback.answer(lexicon['mobile_purchase_disabled'], show_alert=True)
+        return
+
     desc_key = duration
 
     rub_amount = dct_price[duration]
@@ -221,9 +226,6 @@ async def process_payment_sbp(callback: CallbackQuery):
         rub_amount = 1
     user_id = str(callback.from_user.id)
 
-    if 'white' in duration:
-        duration = duration.replace('white_', '')
-        white_flag = True
     duration = normalize_tariff_duration_key(duration)
 
     tg_uname = callback.from_user.username
@@ -233,7 +235,7 @@ async def process_payment_sbp(callback: CallbackQuery):
             des=f"Подписка в подарок {dct_desc[desc_key]}",
             user_id=user_id,
             duration=duration,
-            white=white_flag,
+            white=False,
             payment_method=2,  # 2 = СБП QR
             telegram_username=tg_uname,
         )
@@ -243,7 +245,7 @@ async def process_payment_sbp(callback: CallbackQuery):
             des=dct_desc[desc_key],
             user_id=user_id,
             duration=duration,
-            white=white_flag,
+            white=False,
             payment_method=2,  # 2 = СБП QR
             telegram_username=tg_uname,
         )
@@ -251,15 +253,14 @@ async def process_payment_sbp(callback: CallbackQuery):
     if payment_info['status'] == 'pending':
         try:
             text = lexicon['payment_link'].format(wl_bonus='')
-            if white_flag:
-                text = lexicon['payment_link_white']
             if 'gift' in callback.data:
                 text += '\n\nДля оплаты <b>подарочной подписки</b> перейдите по ссылке:'
             else:
                 text += '\n\nДля оплаты тарифа перейдите по ссылке:'
-            await callback.message.edit_text(
-                text=text,
-                reply_markup=keyboard_payment_sbp("💳 Оплатить через СБП", payment_info['url'])
+            await edit_or_send_screen(
+                callback,
+                text,
+                keyboard_payment_sbp("💳 Оплатить через СБП", payment_info['url']),
             )
             logger.info(f"Юзер {user_id} создал счет на оплату {'подарка' if gift_flag else ''} {rub_amount} руб")
 
@@ -278,10 +279,14 @@ async def process_payment_sbp(callback: CallbackQuery):
 async def process_payment_card(callback: CallbackQuery):
     await callback.answer()
     gift_flag = False
-    white_flag = False
     if 'gift_' in callback.data:
         gift_flag = True
     duration = callback.data.replace('card_r_', '').replace('card_gift_r_', '')
+
+    if is_mobile_tariff_key(duration):
+        await callback.answer(lexicon['mobile_purchase_disabled'], show_alert=True)
+        return
+
     desc_key = duration
 
     rub_amount = dct_price[duration]
@@ -289,9 +294,6 @@ async def process_payment_card(callback: CallbackQuery):
         rub_amount = 1
     user_id = str(callback.from_user.id)
 
-    if 'white' in duration:
-        duration = duration.replace('white_', '')
-        white_flag = True
     duration = normalize_tariff_duration_key(duration)
 
     tg_uname = callback.from_user.username
@@ -301,7 +303,7 @@ async def process_payment_card(callback: CallbackQuery):
             des=f"Подписка в подарок {dct_desc[desc_key]}",
             user_id=user_id,
             duration=duration,
-            white=white_flag,
+            white=False,
             payment_method=11,
             telegram_username=tg_uname,
         )
@@ -311,7 +313,7 @@ async def process_payment_card(callback: CallbackQuery):
             des=dct_desc[desc_key],
             user_id=user_id,
             duration=duration,
-            white=white_flag,
+            white=False,
             payment_method=11,
             telegram_username=tg_uname,
         )
@@ -319,15 +321,14 @@ async def process_payment_card(callback: CallbackQuery):
     if payment_info['status'] == 'pending':
         try:
             text = lexicon['payment_link'].format(wl_bonus='')
-            if white_flag:
-                text = lexicon['payment_link_white']
             if 'gift' in callback.data:
                 text += '\n\nДля оплаты <b>подарочной подписки</b> перейдите по ссылке:'
             else:
                 text += '\n\nДля оплаты тарифа перейдите по ссылке:'
-            await callback.message.edit_text(
-                text=text,
-                reply_markup=keyboard_payment_sbp("💳 Оплатить по карте", payment_info['url'])
+            await edit_or_send_screen(
+                callback,
+                text,
+                keyboard_payment_sbp("💳 Оплатить по карте", payment_info['url']),
             )
             logger.info(f"Юзер {user_id} создал счет на оплату по карте {'подарка' if gift_flag else ''} {rub_amount} руб")
 
