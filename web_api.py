@@ -14,7 +14,7 @@ from typing import Annotated, Any, Literal, Optional
 import bcrypt
 import jwt
 from aiogram.types import LabeledPrice
-from fastapi import Depends, FastAPI, HTTPException, Request, Security, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Security, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
@@ -50,6 +50,7 @@ from payments.payload_source import SITE, SUBPAGE
 from payments.pay_cryptobot import create_cryptobot_payment
 from payments.pay_freekassa import pay_site
 from payments.pay_stars import get_stars_amount
+from wl_traffic.service import get_wl_used_gb_for_user
 import aiohttp
 
 
@@ -505,6 +506,11 @@ class SubPagePayIn(BaseModel):
     duration: SubPageDuration
 
 
+class SubPageDeviceDeleteIn(BaseModel):
+    username: str = Field(..., min_length=1, max_length=100)
+    hwid: str = Field(..., min_length=1, max_length=256)
+
+
 async def _resolve_sub_page_payer(user_id: int) -> tuple[str, int]:
     """payload_user и billing_user_id для оплаты со страницы подписки."""
     if user_id > 0:
@@ -527,6 +533,37 @@ def _reject_sub_page_telegram_only_pay(user_id: int) -> None:
             status.HTTP_400_BAD_REQUEST,
             "Для пользователей сайта доступна оплата только СБП и картой.",
         )
+
+
+def _hwid_device_limit(panel_user: dict[str, Any]) -> Optional[int]:
+    raw = panel_user.get("hwidDeviceLimit")
+    if raw is None:
+        return None
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
+def _sub_page_device_item(device: dict[str, Any]) -> dict[str, str]:
+    return {
+        "hwid": str(device.get("hwid") or ""),
+        "deviceModel": str(device.get("deviceModel") or ""),
+        "platform": str(device.get("platform") or ""),
+        "osVersion": str(device.get("osVersion") or ""),
+    }
+
+
+async def _sub_page_panel_user(username: str) -> dict[str, Any]:
+    uname = (username or "").strip()
+    if not uname:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Не задан username")
+    panel_resp = await x3.get_user_by_username(uname)
+    user = x3._panel_user_from_response(panel_resp)
+    if not user:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
+    return user
 
 
 async def _bot_deeplink_for_sub_page() -> str:
@@ -1151,6 +1188,73 @@ async def sub_page_pay_cryptobot(body: SubPagePayIn, request: Request, _: SubPag
     return {
         "payment_url": result.get("url") or "",
         "invoice_id": result.get("invoice_id"),
+    }
+
+
+@app.get("/api/v1/sub_page/devices")
+async def sub_page_devices(
+    request: Request,
+    _: SubPageAuth,
+    username: str = Query(..., min_length=1, max_length=100),
+):
+    _rate_limit_or_raise(_client_ip_for_rate_limit(request), "sub_page_devices", max_req=60, window=300)
+    panel_user = await _sub_page_panel_user(username)
+    panel_id = x3._panel_user_id(panel_user)
+    if panel_id is None:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "Не удалось определить id пользователя в панели",
+        )
+    devices, total = await x3.get_user_hwid_devices(str(panel_id))
+    items = [_sub_page_device_item(d) for d in devices if isinstance(d, dict)]
+    return {
+        "total": int(total) if total else len(items),
+        "limit": _hwid_device_limit(panel_user),
+        "devices": items,
+    }
+
+
+@app.post("/api/v1/sub_page/devices/delete")
+async def sub_page_devices_delete(body: SubPageDeviceDeleteIn, request: Request, _: SubPageAuth):
+    _rate_limit_or_raise(
+        _client_ip_for_rate_limit(request), "sub_page_devices_delete", max_req=20, window=300
+    )
+    panel_user = await _sub_page_panel_user(body.username)
+    panel_id = x3._panel_user_id(panel_user)
+    if panel_id is None:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "Не удалось определить id пользователя в панели",
+        )
+    hwid = body.hwid.strip()
+    if not hwid:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Не задан hwid")
+    ok = await x3.delete_user_hwid_device(str(panel_id), hwid)
+    if not ok:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Не удалось удалить устройство")
+    return {"ok": True}
+
+
+@app.get("/api/v1/sub_page/wl-traffic")
+async def sub_page_wl_traffic(
+    request: Request,
+    _: SubPageAuth,
+    user_id: int = Query(..., description="Telegram user id или отрицательный billing id сайта"),
+):
+    _rate_limit_or_raise(
+        _client_ip_for_rate_limit(request), "sub_page_wl_traffic", max_req=40, window=300
+    )
+    if user_id == 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Некорректный user_id")
+    trafic_wl, limit_wl = await sql.get_wl_limits(user_id)
+    used_gb = await get_wl_used_gb_for_user(x3, user_id, trafic_wl, sql=sql)
+    limit_gb = round(float(limit_wl or 0.0), 2)
+    used_gb = round(float(used_gb or 0.0), 2)
+    remaining_gb = max(0.0, round(limit_gb - used_gb, 2))
+    return {
+        "limit_gb": limit_gb,
+        "used_gb": used_gb,
+        "remaining_gb": remaining_gb,
     }
 
 
