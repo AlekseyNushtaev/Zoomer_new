@@ -796,15 +796,34 @@ class X3:
         return raw[0] if isinstance(raw, list) else raw
 
     @staticmethod
-    def _panel_user_is_active(user: dict) -> bool:
+    def _panel_expire_at(user: dict) -> Optional[datetime.datetime]:
         expiry_time_str = user.get('expireAt')
         if not expiry_time_str:
-            return False
+            return None
         expiry_dt = datetime.datetime.fromisoformat(expiry_time_str.replace('Z', '+00:00'))
+        if expiry_dt.tzinfo is None:
+            expiry_dt = expiry_dt.replace(tzinfo=datetime.timezone.utc)
+        return expiry_dt.astimezone(datetime.timezone.utc)
+
+    @staticmethod
+    def _panel_user_is_active(user: dict) -> bool:
+        expiry_dt = X3._panel_expire_at(user)
+        if expiry_dt is None:
+            return False
         now = datetime.datetime.now(datetime.timezone.utc)
-        expiry_time = int(expiry_dt.timestamp() * 1000)
-        current_time = int(now.timestamp() * 1000)
-        return user.get('status') == 'ACTIVE' and expiry_time > current_time
+        return user.get('status') == 'ACTIVE' and expiry_dt > now
+
+    @staticmethod
+    def _panel_user_subscription_usable(user: dict) -> bool:
+        """Подписка не истекла — ссылка, устройства (ACTIVE, LIMITED и т.п.)."""
+        expiry_dt = X3._panel_expire_at(user)
+        if expiry_dt is None:
+            return False
+        now = datetime.datetime.now(datetime.timezone.utc)
+        if expiry_dt <= now:
+            return False
+        status = (user.get('status') or '').upper()
+        return status not in ('DISABLED', 'EXPIRED')
 
     async def active_subscription_slots(
         self, telegram_id: int,
@@ -815,7 +834,7 @@ class X3:
             username = f"{telegram_id}{suffix}"
             users = await self.get_user_by_username(username)
             user = self._panel_user_from_response(users)
-            if not user or not self._panel_user_is_active(user):
+            if not user or not self._panel_user_subscription_usable(user):
                 continue
             user_uuid = user.get('uuid')
             if not user_uuid:

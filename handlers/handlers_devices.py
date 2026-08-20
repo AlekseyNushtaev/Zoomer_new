@@ -7,7 +7,7 @@ from typing import Any
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
-from bot import x3
+from bot import sql, x3
 from keyboard import (
     BTN_BACK,
     create_kb,
@@ -15,7 +15,7 @@ from keyboard import (
     keyboard_devices_list,
 )
 from logging_config import logger
-from utils.menu_ui import edit_or_send_photo
+from utils.menu_ui import edit_or_send_photo, has_active_subscription
 
 router = Router()
 
@@ -72,6 +72,24 @@ async def _slot_context(telegram_id: int, slot_key: str) -> tuple[str, str, str]
     for sk, label, user_uuid, username in await x3.active_subscription_slots(telegram_id):
         if sk == slot_key:
             return label, user_uuid, username
+
+    if slot_key != _DEFAULT_SLOT:
+        return None
+
+    username = str(telegram_id)
+    panel_resp = await x3.get_user_by_username(username)
+    user = x3._panel_user_from_response(panel_resp)
+    if not user:
+        return None
+    user_uuid = user.get('uuid')
+    if not user_uuid:
+        return None
+    if x3._panel_user_subscription_usable(user):
+        return "💫 VPN PRO", user_uuid, username
+
+    db_user = await sql.get_user(telegram_id)
+    if has_active_subscription(db_user):
+        return "💫 VPN PRO", user_uuid, username
     return None
 
 
