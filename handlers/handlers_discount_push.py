@@ -28,7 +28,7 @@ from keyboard import (
 from lexicon import dct_desc_discount_33, dct_price_discount_33, lexicon
 from logging_config import logger
 from payments.pay_cryptobot import create_cryptobot_payment
-from payments.pay_freekassa import pay
+from payments.pay_platega import pay as pay_platega, PLATEGA_CARD_METHOD, PLATEGA_SBP_METHOD
 from payments.payload_source import BOT
 from telegram_ids import is_telegram_chat_id
 
@@ -198,17 +198,17 @@ async def _create_discount_fk_payment(
 ) -> None:
     rub_amount = dct_price_discount_33[duration]
     if callback.from_user.id in ADMIN_IDS:
-        rub_amount = 10 if ui_kind == "sbp" else 1
+        rub_amount = 1
     user_id = str(callback.from_user.id)
     description = f"{dct_desc_discount_33[duration]} (скидка 33%)"
 
-    payment_info = await pay(
+    payment_info = await pay_platega(
         val=str(rub_amount),
         des=description,
         user_id=user_id,
         duration=duration,
         white=False,
-        ui_kind=ui_kind,
+        payment_method=PLATEGA_CARD_METHOD if ui_kind == "card" else PLATEGA_SBP_METHOD,
         payload_suffix=_DISCOUNT_PAYLOAD_SUFFIX,
     )
 

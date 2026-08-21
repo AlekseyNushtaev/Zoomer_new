@@ -27,14 +27,14 @@ from config_bd.utils import _norm_email, user_row_to_api_dict
 from X3 import panel_username_for_site_user
 from config import (
     ADMIN_IDS,
-    API_FREEKASSA,
     BOT_URL,
     CRYPTOBOT_API_TOKEN,
     GOOGLE_CLIENT_ID,
     JWT_SECRET,
     PARTNER_BOT_API_KEY,
     PAYMENT_MAX_PENDING_PER_USER,
-    SHOP_ID_FREEKASSA,
+    PLATEGA_API_KEY,
+    PLATEGA_MERCHANT_ID,
     SMTP_FROM,
     SMTP_HOST,
     SMTP_PASSWORD,
@@ -48,7 +48,7 @@ from lexicon import dct_desc, dct_price, lexicon
 from logging_config import logger
 from payments.payload_source import SITE, SUBPAGE
 from payments.pay_cryptobot import create_cryptobot_payment
-from payments.pay_freekassa import pay_site
+from payments.pay_platega import pay_site_card, pay_site_sbp
 from payments.pay_stars import get_stars_amount
 from wl_traffic.service import get_wl_used_gb_for_user
 import aiohttp
@@ -993,10 +993,10 @@ async def payments_create(ctx: JwtCtx, body: CreatePaymentIn):
     if billing_user_id in ADMIN_IDS:
         price = 1
 
-    if body.method == "sbp" and (not API_FREEKASSA or SHOP_ID_FREEKASSA is None):
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "FreeKassa is not configured")
-    if body.method == "card" and (not API_FREEKASSA or SHOP_ID_FREEKASSA is None):
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "FreeKassa is not configured")
+    if body.method == "sbp" and (not PLATEGA_API_KEY or not PLATEGA_MERCHANT_ID):
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Platega is not configured")
+    if body.method == "card" and (not PLATEGA_API_KEY or not PLATEGA_MERCHANT_ID):
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Platega is not configured")
 
     description = (
         f"Подписка в подарок {dct_desc[desc_key]}" if body.is_gift else dct_desc[desc_key]
@@ -1006,18 +1006,30 @@ async def payments_create(ctx: JwtCtx, body: CreatePaymentIn):
     if not isinstance(site_uname, str):
         site_uname = None
 
-    result = await pay_site(
-        val=str(price),
-        des=description,
-        payload_user=payload_user,
-        billing_user_id=billing_user_id,
-        duration=duration_str,
-        white=white,
-        is_gift=body.is_gift,
-        kind=body.method,
-        telegram_username=site_uname,
-        payload_source=SITE,
-    )
+    if body.method == "card":
+        result = await pay_site_card(
+            val=str(price),
+            des=description,
+            payload_user=payload_user,
+            billing_user_id=billing_user_id,
+            duration=duration_str,
+            white=white,
+            is_gift=body.is_gift,
+            telegram_username=site_uname,
+            payload_source=SITE,
+        )
+    else:
+        result = await pay_site_sbp(
+            val=str(price),
+            des=description,
+            payload_user=payload_user,
+            billing_user_id=billing_user_id,
+            duration=duration_str,
+            white=white,
+            is_gift=body.is_gift,
+            telegram_username=site_uname,
+            payload_source=SITE,
+        )
 
     if result["status"] == "rate_limited":
         raise HTTPException(
@@ -1036,8 +1048,8 @@ async def payments_create(ctx: JwtCtx, body: CreatePaymentIn):
 @app.post("/api/v1/sub_page/pay/fk_sbp")
 async def sub_page_pay_fk_sbp(body: SubPagePayIn, request: Request, _: SubPageAuth):
     _rate_limit_or_raise(_client_ip_for_rate_limit(request), "sub_page_fk_sbp", max_req=20, window=300)
-    if not API_FREEKASSA or SHOP_ID_FREEKASSA is None:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "FreeKassa не настроена")
+    if not PLATEGA_API_KEY or not PLATEGA_MERCHANT_ID:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Platega не настроена")
     _reject_mobile_purchase(body.duration)
 
     desc_key, duration_str, white = _tariff_parts(body.duration)
@@ -1046,7 +1058,7 @@ async def sub_page_pay_fk_sbp(body: SubPagePayIn, request: Request, _: SubPageAu
     if billing_user_id in ADMIN_IDS:
         price = 1
 
-    result = await pay_site(
+    result = await pay_site_sbp(
         val=str(price),
         des=dct_desc[desc_key],
         payload_user=payload_user,
@@ -1054,7 +1066,6 @@ async def sub_page_pay_fk_sbp(body: SubPagePayIn, request: Request, _: SubPageAu
         duration=duration_str,
         white=white,
         is_gift=False,
-        kind="sbp",
         telegram_username=None,
         payload_source=SUB_PAGE_PAYLOAD_SOURCE,
     )
@@ -1064,7 +1075,7 @@ async def sub_page_pay_fk_sbp(body: SubPagePayIn, request: Request, _: SubPageAu
             lexicon["payment_too_many_pending"].format(PAYMENT_MAX_PENDING_PER_USER),
         )
     if result["status"] != "pending":
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Не удалось создать платёж FreeKassa (СБП)")
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Не удалось создать платёж Platega (СБП)")
 
     return {
         "payment_url": result.get("url") or "",
@@ -1075,8 +1086,8 @@ async def sub_page_pay_fk_sbp(body: SubPagePayIn, request: Request, _: SubPageAu
 @app.post("/api/v1/sub_page/pay/fk_card")
 async def sub_page_pay_fk_card(body: SubPagePayIn, request: Request, _: SubPageAuth):
     _rate_limit_or_raise(_client_ip_for_rate_limit(request), "sub_page_fk_card", max_req=20, window=300)
-    if not API_FREEKASSA or SHOP_ID_FREEKASSA is None:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "FreeKassa не настроена")
+    if not PLATEGA_API_KEY or not PLATEGA_MERCHANT_ID:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Platega не настроена")
     _reject_mobile_purchase(body.duration)
 
     desc_key, duration_str, white = _tariff_parts(body.duration)
@@ -1085,7 +1096,7 @@ async def sub_page_pay_fk_card(body: SubPagePayIn, request: Request, _: SubPageA
     if billing_user_id in ADMIN_IDS:
         price = 1
 
-    result = await pay_site(
+    result = await pay_site_card(
         val=str(price),
         des=dct_desc[desc_key],
         payload_user=payload_user,
@@ -1093,7 +1104,6 @@ async def sub_page_pay_fk_card(body: SubPagePayIn, request: Request, _: SubPageA
         duration=duration_str,
         white=white,
         is_gift=False,
-        kind="card",
         telegram_username=None,
         payload_source=SUB_PAGE_PAYLOAD_SOURCE,
     )
@@ -1103,7 +1113,7 @@ async def sub_page_pay_fk_card(body: SubPagePayIn, request: Request, _: SubPageA
             lexicon["payment_too_many_pending"].format(PAYMENT_MAX_PENDING_PER_USER),
         )
     if result["status"] != "pending":
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Не удалось создать платёж FreeKassa (карта)")
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Не удалось создать платёж Platega (карта)")
 
     return {
         "payment_url": result.get("url") or "",

@@ -416,11 +416,11 @@ async def _handle_wata_style_callback(callback: CallbackQuery, ui_kind: UiKind) 
         )
 
 
-@router.callback_query(F.data.startswith("wata_sbp_"))
-async def process_payment_fk_from_sbp_button(callback: CallbackQuery):
-    await _handle_wata_style_callback(callback, "sbp")
-
-
-@router.callback_query(F.data.startswith("wata_card_"))
-async def process_payment_fk_from_card_button(callback: CallbackQuery):
-    await _handle_wata_style_callback(callback, "card")
+# СБП и карта РФ переведены на Platega (pay_platega); хендлеры FreeKassa отключены.
+# @router.callback_query(F.data.startswith("wata_sbp_"))
+# async def process_payment_fk_from_sbp_button(callback: CallbackQuery):
+#     await _handle_wata_style_callback(callback, "sbp")
+#
+# @router.callback_query(F.data.startswith("wata_card_"))
+# async def process_payment_fk_from_card_button(callback: CallbackQuery):
+#     await _handle_wata_style_callback(callback, "card")

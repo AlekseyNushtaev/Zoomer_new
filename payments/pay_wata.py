@@ -18,7 +18,7 @@ from lexicon import dct_price, dct_desc, lexicon
 from logging_config import logger
 
 router = Router()
-# Роутер в main.py не подключается: callback wata_sbp_* / wata_card_* обрабатывает pay_freekassa (FreeKassa).
+# Роутер в main.py не подключается: wata_sbp_* и wata_card_* — Platega.
 
 WataKind = Literal["sbp", "card"]
 

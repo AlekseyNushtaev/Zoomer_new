@@ -94,6 +94,7 @@ class Payments(Base):
     status = Column(String, nullable=True)
     transaction_id = Column(String, nullable=True)
     payload = Column(String, nullable=True)
+    connect_panel = Column(Boolean, nullable=True, default=False)
 
 
 class PaymentsCards(Base):
@@ -107,6 +108,7 @@ class PaymentsCards(Base):
     status = Column(String, nullable=True)
     transaction_id = Column(String, nullable=True)
     payload = Column(String, nullable=True)
+    connect_panel = Column(Boolean, nullable=True, default=False)
 
 
 class PaymentsPlategaCrypto(Base):

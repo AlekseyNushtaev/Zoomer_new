@@ -1954,6 +1954,24 @@ class AsyncSQL:
             await session.execute(stmt)
             await session.commit()
 
+    async def update_platega_connect_panel(
+        self,
+        transaction_id: str,
+        value: bool,
+        *,
+        is_card: bool,
+    ) -> None:
+        """connect_panel у платежа Platega SBP (payments) или карты (payments_cards)."""
+        model = PaymentsCards if is_card else Payments
+        async with self.session_factory() as session:
+            stmt = (
+                update(model)
+                .where(model.transaction_id == transaction_id)
+                .values(connect_panel=value)
+            )
+            await session.execute(stmt)
+            await session.commit()
+
     async def update_payment_platega_crypto_status(self, transaction_id: str, new_status: str) -> None:
         """Обновляет статус платежа по transaction_id."""
         async with self.session_factory() as session:
@@ -2314,7 +2332,8 @@ class AsyncSQL:
                 status=status,
                 transaction_id=transaction_id,
                 payload=payload,
-                is_gift=is_gift
+                is_gift=is_gift,
+                connect_panel=False,
             )
             session.add(payment)
             try:
@@ -2337,7 +2356,8 @@ class AsyncSQL:
                 status=status,
                 transaction_id=transaction_id,
                 payload=payload,
-                is_gift=is_gift
+                is_gift=is_gift,
+                connect_panel=False,
             )
             session.add(payment)
             try:

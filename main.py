@@ -10,7 +10,8 @@ from config import ADMIN_IDS, THROTTLE_MAX_UPDATES, THROTTLE_WINDOW_SEC, WEB_API
 from utils.menu_photos import init_menu_photos
 from middleware.user_throttle import UserThrottleMiddleware
 from config_bd.models import create_tables, engine
-from payments import pay_stars, pay_cryptobot, pay_platega, pay_freekassa, pay_wl_traffic
+from payments import pay_stars, pay_cryptobot, pay_platega, pay_wl_traffic
+# from payments import pay_freekassa
 # from payments import pay_wata
 from sheduler.check_connect import check_connect
 from sheduler.check_cryptobot import check_cryptobot_payments
@@ -76,8 +77,8 @@ async def main() -> None:
     dp.include_router(handlers_excel_restore.router)
     dp.include_router(handlers_statistic.router)
     dp.include_router(pay_stars.router)
-    # dp.include_router(pay_platega.router)
-    dp.include_router(pay_freekassa.router)
+    dp.include_router(pay_platega.router)
+    # dp.include_router(pay_freekassa.router)
     # dp.include_router(pay_wata.router)
     dp.include_router(pay_cryptobot.router)
     dp.include_router(pay_wl_traffic.router)
@@ -86,8 +87,8 @@ async def main() -> None:
     scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
     scheduler.add_job(send_message_cron, trigger='interval', minutes=10, args=[bot], misfire_grace_time=120)
     scheduler.add_job(check_connect, trigger='interval', minutes=14, misfire_grace_time=60)
-    # scheduler.add_job(check_platega, trigger='interval', minutes=1, misfire_grace_time=10)
-    # scheduler.add_job(check_platega_card, trigger='interval', minutes=1, misfire_grace_time=10)
+    scheduler.add_job(check_platega, trigger='interval', minutes=1, misfire_grace_time=10)
+    scheduler.add_job(check_platega_card, trigger='interval', minutes=1, misfire_grace_time=10)
     # scheduler.add_job(check_platega_crypto, trigger='interval', minutes=1, misfire_grace_time=10)
     # scheduler.add_job(check_wata_sbp, trigger='interval', minutes=1, misfire_grace_time=10)
     # scheduler.add_job(check_wata_card, trigger='interval', minutes=1, misfire_grace_time=10)

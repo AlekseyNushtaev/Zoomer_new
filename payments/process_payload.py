@@ -22,6 +22,15 @@ from wl_traffic.service import (
 from wl_traffic.texts import format_wl_checker_traffic_purchase
 
 
+async def _mark_connect_panel(transaction_id: Optional[str], is_card: bool) -> None:
+    if not transaction_id:
+        return
+    try:
+        await sql.update_platega_connect_panel(transaction_id, True, is_card=is_card)
+    except Exception as e:
+        logger.error("connect_panel: не удалось обновить tx={}: {}", transaction_id, e)
+
+
 def _payment_rub_for_partner(method: str, amount: int | float) -> int:
     """Сумма оплаты в рублях для расчёта партнёрского вознаграждения."""
     if method == "stars":
@@ -171,11 +180,20 @@ async def _apply_panel_subscription(
     return response, existed
 
 
-async def _process_traffic_topup(user_id: int, gb: int, method: str, amount: int | float) -> bool:
+async def _process_traffic_topup(
+    user_id: int,
+    gb: int,
+    method: str,
+    amount: int | float,
+    *,
+    transaction_id: Optional[str] = None,
+    is_card: bool = False,
+) -> bool:
     """Пополнение трафика Антиглушилка после успешной оплаты."""
     await sql.add_wl_limit(user_id, float(gb))
 
     panel_user = await fetch_panel_user(x3, user_id, sql=sql)
+    await _mark_connect_panel(transaction_id, is_card)
     if panel_user:
         await reassign_to_active_squad(x3, panel_user)
 
@@ -209,7 +227,12 @@ async def _process_traffic_topup(user_id: int, gb: int, method: str, amount: int
     return True
 
 
-async def process_confirmed_payment(payload) -> bool:
+async def process_confirmed_payment(
+    payload,
+    *,
+    transaction_id: Optional[str] = None,
+    is_card: bool = False,
+) -> bool:
     """Обработка подтвержденного платежа. True — подписка/подарок применены успешно."""
     try:
         payload_parts: dict[str, str] = {}
@@ -240,7 +263,14 @@ async def process_confirmed_payment(payload) -> bool:
             uid_traffic = int(raw_uid)
             if method == "stars":
                 await sql.add_payment_stars(uid_traffic, amount, payload, False)
-            return await _process_traffic_topup(uid_traffic, traffic_gb, method, amount)
+            return await _process_traffic_topup(
+                uid_traffic,
+                traffic_gb,
+                method,
+                amount,
+                transaction_id=transaction_id,
+                is_card=is_card,
+            )
 
         duration = _payload_duration_to_panel_days(raw_duration)
         secret_tariff = raw_duration == "30secret"
@@ -332,6 +362,7 @@ async def process_confirmed_payment(payload) -> bool:
                         disable_web_page_preview=True,
                     )
                     logger.info("✅ Сообщения о подарке отправлены пользователю {}", giver_billing_id)
+                    await _mark_connect_panel(transaction_id, is_card)
                 except Exception as e:
                     logger.error("❌ Ошибка отправки сообщения о подарке: {}", e)
             else:
@@ -357,6 +388,8 @@ async def process_confirmed_payment(payload) -> bool:
             if not response:
                 logger.error("❌ Не удалось обновить клиента {}", user_id_str)
                 return False
+
+            await _mark_connect_panel(transaction_id, is_card)
 
             result_active = await x3.activ(user_id_str)
             subscription_time = result_active.get("time", "-")

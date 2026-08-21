@@ -551,66 +551,66 @@ async def cancel_partner_apply(callback: CallbackQuery, state: FSMContext):
     await partner_back_create_menu(callback, state)
 
 
-@router.managed_bot()
-async def partner_managed_bot_created(event, event_from_user: User):
-    creator = event.user
-    managed_bot_user = event.bot_user
-    if not creator:
-        logger.warning("partner managed_bot: missing creator user")
-        return
+# @router.managed_bot()
+# async def partner_managed_bot_created(event, event_from_user: User):
+#     creator = event.user
+#     managed_bot_user = event.bot_user
+#     if not creator:
+#         logger.warning("partner managed_bot: missing creator user")
+#         return
 
-    try:
-        token = await bot.get_managed_bot_token(user_id=managed_bot_user.id)
-    except Exception as e:
-        logger.exception("partner managed_bot get token failed: bot_id={} err={}", managed_bot_user.id, e)
-        try:
-            await bot.send_message(
-                creator.id,
-                "❌ Не удалось получить токен созданного бота. Попробуйте ещё раз или подключите токен вручную.",
-            )
-        except Exception:
-            pass
-        return
+#     try:
+#         token = await bot.get_managed_bot_token(user_id=managed_bot_user.id)
+#     except Exception as e:
+#         logger.exception("partner managed_bot get token failed: bot_id={} err={}", managed_bot_user.id, e)
+#         try:
+#             await bot.send_message(
+#                 creator.id,
+#                 "❌ Не удалось получить токен созданного бота. Попробуйте ещё раз или подключите токен вручную.",
+#             )
+#         except Exception:
+#             pass
+#         return
 
-    try:
-        await strip_managed_bot_profile(token)
-    except Exception as e:
-        logger.warning("partner managed_bot profile strip failed: bot_id={} err={}", managed_bot_user.id, e)
+#     try:
+#         await strip_managed_bot_profile(token)
+#     except Exception as e:
+#         logger.warning("partner managed_bot profile strip failed: bot_id={} err={}", managed_bot_user.id, e)
 
-    app, err = await submit_managed_partner_application(
-        partner_tg_id=creator.id,
-        partner_username=creator.username,
-        partner_first_name=creator.first_name,
-        token=token,
-    )
-    if err:
-        logger.warning(
-            "partner managed_bot application failed: partner_tg_id={} bot=@{} err={}",
-            creator.id,
-            managed_bot_user.username,
-            err,
-        )
-        try:
-            await bot.send_message(creator.id, f"❌ {err}")
-        except Exception:
-            pass
-        return
+#     app, err = await submit_managed_partner_application(
+#         partner_tg_id=creator.id,
+#         partner_username=creator.username,
+#         partner_first_name=creator.first_name,
+#         token=token,
+#     )
+#     if err:
+#         logger.warning(
+#             "partner managed_bot application failed: partner_tg_id={} bot=@{} err={}",
+#             creator.id,
+#             managed_bot_user.username,
+#             err,
+#         )
+#         try:
+#             await bot.send_message(creator.id, f"❌ {err}")
+#         except Exception:
+#             pass
+#         return
 
-    try:
-        await bot.send_message(
-            creator.id,
-            "✅ Заявка отправлена на модерацию. Мы уведомим вас после проверки.",
-        )
-    except Exception as e:
-        logger.error("partner managed_bot notify partner failed: {}", e)
+#     try:
+#         await bot.send_message(
+#             creator.id,
+#             "✅ Заявка отправлена на модерацию. Мы уведомим вас после проверки.",
+#         )
+#     except Exception as e:
+#         logger.error("partner managed_bot notify partner failed: {}", e)
 
-    await notify_admins_new_application(creator.id, app.id)
-    logger.info(
-        "partner managed_bot application created: app_id={} partner_tg_id={} bot=@{}",
-        app.id,
-        creator.id,
-        app.bot_username,
-    )
+#     await notify_admins_new_application(creator.id, app.id)
+#     logger.info(
+#         "partner managed_bot application created: app_id={} partner_tg_id={} bot=@{}",
+#         app.id,
+#         creator.id,
+#         app.bot_username,
+#     )
 
 
 @router.message(PartnerApplyFSM.waiting_token)

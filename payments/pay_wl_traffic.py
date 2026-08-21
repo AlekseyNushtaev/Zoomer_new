@@ -11,7 +11,7 @@ from keyboard import BTN_BACK, create_kb, keyboard_payment_sbp, keyboard_payment
 from lexicon import lexicon
 from logging_config import logger
 from payments.pay_cryptobot import create_cryptobot_payment
-from payments.pay_freekassa import pay
+from payments.pay_platega import pay as pay_platega, PLATEGA_CARD_METHOD, PLATEGA_SBP_METHOD
 from payments.payload_source import BOT
 from wl_traffic.constants import WL_TRAFFIC_TARIFFS
 
@@ -31,15 +31,15 @@ def _traffic_price(gb: str, user_id: int) -> int:
 
 @router.callback_query(F.data.startswith("wl_traffic_sbp_"))
 async def wl_traffic_pay_sbp(callback: CallbackQuery):
-    await _pay_fk(callback, "sbp")
+    await _pay_rub(callback, "sbp")
 
 
 @router.callback_query(F.data.startswith("wl_traffic_card_"))
 async def wl_traffic_pay_card(callback: CallbackQuery):
-    await _pay_fk(callback, "card")
+    await _pay_rub(callback, "card")
 
 
-async def _pay_fk(callback: CallbackQuery, ui_kind: str) -> None:
+async def _pay_rub(callback: CallbackQuery, ui_kind: str) -> None:
     await callback.answer()
     gb = (callback.data or "").rsplit("_", 1)[-1]
     if gb not in WL_TRAFFIC_TARIFFS:
@@ -49,13 +49,13 @@ async def _pay_fk(callback: CallbackQuery, ui_kind: str) -> None:
     price = _traffic_price(gb, callback.from_user.id)
     duration = _traffic_duration(gb)
 
-    payment_info = await pay(
+    payment_info = await pay_platega(
         val=str(price),
         des=f"Трафик Антиглушилка {gb} GB",
         user_id=user_id,
         duration=duration,
         white=False,
-        ui_kind=ui_kind,
+        payment_method=PLATEGA_CARD_METHOD if ui_kind == "card" else PLATEGA_SBP_METHOD,
     )
 
     btn = "⚡ Оплатить СБП" if ui_kind == "sbp" else "💳 Оплатить картой РФ"
