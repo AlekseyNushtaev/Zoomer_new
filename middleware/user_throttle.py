@@ -48,6 +48,7 @@ class UserThrottleMiddleware(BaseMiddleware):
     """
     Не более ``max_per_window`` апдейтов от одного user_id за ``window_sec`` секунд.
     По умолчанию 25 за 8 с — обычный тап по меню не режется, скриптовый спам — да.
+    Апдейты от ботов (в том числе свои служебные) не считаются.
     """
 
     def __init__(
@@ -73,7 +74,9 @@ class UserThrottleMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         actor = _actor_from_update(event)
-        if actor is None or actor.id in self._bypass:
+        # Служебные эхо рассылки/пина/группы приходят с from_user = бот.
+        # Это не пользовательский флуд — лимит и алерт чекеру на них не вешаем.
+        if actor is None or actor.is_bot or actor.id in self._bypass:
             return await handler(event, data)
 
         uid = actor.id
