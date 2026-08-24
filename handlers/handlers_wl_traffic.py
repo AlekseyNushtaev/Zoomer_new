@@ -46,7 +46,7 @@ async def wl_traffic_buy_cb(callback: CallbackQuery):
     await edit_or_send_photo(
         callback,
         "buy_traffic",
-        "📦 Выберите пакет трафика для сервера <b>Антиглушилка</b>:",
+        lexicon["wl_traffic_choose_pack"],
         keyboard_wl_traffic_tariffs(back_callback=back_callback),
     )
 

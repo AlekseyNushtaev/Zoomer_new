@@ -35,14 +35,14 @@ FOREVER_DURATION_DAYS = 5000
 FOREVER_YEAR_THRESHOLD = 2030
 FOREVER_END_CUTOFF = datetime(FOREVER_YEAR_THRESHOLD, 1, 1)
 
-# gb -> price (₽)
+# gb -> price (₽), от большего к меньшему
 WL_TRAFFIC_TARIFFS: dict[str, int] = {
-    "10": 50,
-    "20": 79,
-    "50": 149,
-    "100": 259,
-    "250": 629,
     "500": 1249,
+    "250": 629,
+    "100": 259,
+    "50": 149,
+    "20": 79,
+    "10": 50,
 }
 
 # duration days -> months for +10 GB/month bonus on subscription payment
