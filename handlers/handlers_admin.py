@@ -133,7 +133,7 @@ def _split_long_text(text: str, limit: int = 3800) -> list[str]:
     return parts
 
 
-_DELETE_STAMPS = ("nnnn", "Premium")
+_DELETE_STAMPS = ("nnnn", "premium")
 _DEL_STAMPS_YES_CB = "del_stamps_yes"
 _DEL_STAMPS_NO_CB = "del_stamps_no"
 
@@ -613,7 +613,7 @@ def _delete_stamps_preview_text(rows: list[dict]) -> str:
     lines = [
         "⚠️ <b>Удаление пользователей из БД</b>",
         "",
-        "Stamp: <code>nnnn</code>, <code>Premium</code>",
+        "Stamp: <code>nnnn</code>, <code>premium</code>",
         "",
     ]
     for stamp in _DELETE_STAMPS:
@@ -758,13 +758,13 @@ async def _send_delete_stamps_report(chat_id: int, rows: list[dict]) -> None:
 
 @router.message(Command(commands=["delete_stamps"]))
 async def delete_stamps_command(message: Message):
-    """Превью удаления пользователей со stamp nnnn и Premium."""
+    """Превью удаления пользователей со stamp nnnn и premium."""
     if message.from_user.id not in ADMIN_IDS:
         return
 
     rows = await sql.list_users_by_stamps(list(_DELETE_STAMPS))
     if not rows:
-        await message.answer("Пользователей со stamp nnnn / Premium не найдено.")
+        await message.answer("Пользователей со stamp nnnn / premium не найдено.")
         return
 
     await message.answer(
@@ -780,7 +780,7 @@ async def delete_stamps_cancel(callback: CallbackQuery):
         await callback.answer("Нет доступа.", show_alert=True)
         return
     await callback.answer()
-    await callback.message.edit_text("Удаление пользователей со stamp nnnn / Premium отменено.")
+    await callback.message.edit_text("Удаление пользователей со stamp nnnn / premium отменено.")
 
 
 @router.callback_query(F.data == _DEL_STAMPS_YES_CB)
@@ -790,7 +790,7 @@ async def delete_stamps_confirm(callback: CallbackQuery):
         return
 
     await callback.answer()
-    await callback.message.edit_text("⏳ Удаляю пользователей со stamp nnnn / Premium…")
+    await callback.message.edit_text("⏳ Удаляю пользователей со stamp nnnn / premium…")
 
     try:
         rows = await sql.delete_users_by_stamps(list(_DELETE_STAMPS))
@@ -800,12 +800,12 @@ async def delete_stamps_confirm(callback: CallbackQuery):
         return
 
     if not rows:
-        await callback.message.edit_text("Пользователей со stamp nnnn / Premium уже нет.")
+        await callback.message.edit_text("Пользователей со stamp nnnn / premium уже нет.")
         return
 
     logger.info(
         f"Администратор {callback.from_user.id} удалил {len(rows)} пользователей "
-        f"со stamp nnnn/Premium"
+        f"со stamp nnnn/premium"
     )
     await callback.message.edit_text(f"✅ Удалено {len(rows)} пользователей. Отчёт ниже.")
     await _send_delete_stamps_report(callback.message.chat.id, rows)
