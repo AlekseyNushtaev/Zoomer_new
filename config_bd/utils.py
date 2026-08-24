@@ -1766,6 +1766,65 @@ class AsyncSQL:
             logger.info(f"✅ Удалено пользователей: 1 (User_id: {user_id})")
             return True
 
+    async def list_users_by_stamps(self, stamps: List[str]) -> List[Dict[str, Any]]:
+        """Снимок пользователей с stamp из списка (для превью и отчёта)."""
+        if not stamps:
+            return []
+        async with self.session_factory() as session:
+            stmt = select(Users).where(Users.stamp.in_(stamps)).order_by(Users.stamp, Users.id)
+            result = await session.execute(stmt)
+            return [self._user_delete_snapshot(u) for u in result.scalars().all()]
+
+    async def delete_users_by_stamps(self, stamps: List[str]) -> List[Dict[str, Any]]:
+        """
+        Удаляет пользователей с stamp из списка.
+        Возвращает снимок удалённых строк. Связанные linking/reset-коды тоже чистятся.
+        """
+        if not stamps:
+            return []
+        async with self.session_factory() as session:
+            stmt = select(Users).where(Users.stamp.in_(stamps)).order_by(Users.stamp, Users.id)
+            result = await session.execute(stmt)
+            users = list(result.scalars().all())
+            if not users:
+                return []
+
+            snapshots = [self._user_delete_snapshot(u) for u in users]
+            internal_ids = [u.id for u in users]
+            emails = [u.email for u in users if u.email]
+
+            for i in range(0, len(internal_ids), _STAT_IN_CHUNK):
+                chunk = internal_ids[i : i + _STAT_IN_CHUNK]
+                await session.execute(delete(LinkingCodes).where(LinkingCodes.user_id.in_(chunk)))
+                await session.execute(delete(Users).where(Users.id.in_(chunk)))
+            for i in range(0, len(emails), _STAT_IN_CHUNK):
+                await session.execute(
+                    delete(PasswordResetCodes).where(
+                        PasswordResetCodes.email.in_(emails[i : i + _STAT_IN_CHUNK])
+                    )
+                )
+            await session.commit()
+
+            logger.info(f"✅ Удалено пользователей: {len(snapshots)} (stamps={stamps})")
+            return snapshots
+
+    @staticmethod
+    def _user_delete_snapshot(user: Users) -> Dict[str, Any]:
+        return {
+            "id": user.id,
+            "user_id": user.user_id,
+            "stamp": user.stamp,
+            "email": user.email,
+            "ref": user.ref,
+            "partner": user.partner,
+            "create_user": user.create_user,
+            "subscription_end_date": user.subscription_end_date,
+            "white_subscription_end_date": user.white_subscription_end_date,
+            "in_panel": user.in_panel,
+            "is_connect": user.is_connect,
+            "is_delete": user.is_delete,
+        }
+
     async def reset_all_delete_flag(self) -> int:
         """Устанавливает Is_delete = False для всех записей в таблице users."""
         async with self.session_factory() as session:
