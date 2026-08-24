@@ -353,6 +353,24 @@ async def _user_row_from_jwt(ctx: dict[str, Any]):
     return await sql.get_user(ctx["user_id"])
 
 
+def _payload_tg_id_from_user_row(row) -> int:
+    """
+    user_id для payload оплаты: Telegram id при привязке, иначе отрицательный billing id сайта.
+    """
+    tg_col = int(row[1])
+    if tg_col > 0:
+        return tg_col
+    linked = row[28] if len(row) > 28 else None
+    if linked is not None:
+        try:
+            tid = int(linked)
+            if tid > 0:
+                return tid
+        except (TypeError, ValueError):
+            pass
+    return tg_col
+
+
 async def resolve_telegram_user_id(ctx: dict[str, Any]) -> int:
     row = await _user_row_from_jwt(ctx)
     if row is None:
@@ -512,19 +530,19 @@ class SubPageDeviceDeleteIn(BaseModel):
 
 
 async def _resolve_sub_page_payer(user_id: int) -> tuple[str, int]:
-    """payload_user и billing_user_id для оплаты со страницы подписки."""
+    """payload_user (tg_id) и billing_user_id для оплаты со страницы подписки."""
     if user_id > 0:
         return str(user_id), user_id
     row = await sql.get_user(user_id)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
-    em = row[18]
-    if not em:
+    payload_uid = _payload_tg_id_from_user_row(row)
+    if payload_uid <= 0 and not row[18]:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "У пользователя сайта нет email — оплата недоступна",
         )
-    return _norm_email(str(em)), int(row[1])
+    return str(payload_uid), int(row[1])
 
 
 def _reject_sub_page_telegram_only_pay(user_id: int) -> None:
@@ -974,15 +992,13 @@ async def payments_create(ctx: JwtCtx, body: CreatePaymentIn):
     row = await _user_row_from_jwt(ctx)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
-    if ctx.get("auth") == "email":
+    billing_user_id = int(row[1])
+    payload_uid = _payload_tg_id_from_user_row(row)
+    if payload_uid <= 0:
         em = row[18] or ctx.get("username")
         if not em:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Нет email в профиле")
-        payload_user = _norm_email(str(em))
-        billing_user_id = int(row[1])
-    else:
-        billing_user_id = await resolve_telegram_user_id(ctx)
-        payload_user = str(billing_user_id)
+    payload_user = str(payload_uid)
     tariff_id = body.tariff_id
     if tariff_id not in dct_price:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown tariff")
