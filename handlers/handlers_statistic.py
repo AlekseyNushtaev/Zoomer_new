@@ -122,6 +122,8 @@ def _sync_build_analytics_excel(monthly_data: dict, daily_data_by_month: dict) -
         ('Сумма 180д (₽)', 'sum_180_amount'),
         ('Платежей 365д (шт)', 'sum_365_count'),
         ('Сумма 365д (₽)', 'sum_365_amount'),
+        ('Платежей 2 года (шт)', 'sum_730_count'),
+        ('Сумма 2 года (₽)', 'sum_730_amount'),
         ('Платежей Навсегда (шт)', 'sum_3490_count'),
         ('Сумма Навсегда (₽)', 'sum_3490_amount'),
         ('Подарков (шт)', 'gift_count'),
@@ -665,6 +667,7 @@ async def analytics_export(message: Message):
                 sum_90_count = sum_90_amount = 0
                 sum_180_count = sum_180_amount = 0
                 sum_365_count = sum_365_amount = 0
+                sum_730_count = sum_730_amount = 0
                 sum_3490_count = sum_3490_amount = 0
                 gift_count = gift_amount = 0
 
@@ -688,6 +691,9 @@ async def analytics_export(message: Message):
                         elif amount == 2399:
                             sum_365_count += 1
                             sum_365_amount += amount
+                        elif amount == 3699:
+                            sum_730_count += 1
+                            sum_730_amount += amount
                         elif amount in (3490, 4990, 2790):
                             sum_3490_count += 1
                             sum_3490_amount += amount
@@ -723,6 +729,8 @@ async def analytics_export(message: Message):
                     'sum_180_amount': sum_180_amount,
                     'sum_365_count': sum_365_count,
                     'sum_365_amount': sum_365_amount,
+                    'sum_730_count': sum_730_count,
+                    'sum_730_amount': sum_730_amount,
                     'sum_3490_count': sum_3490_count,
                     'sum_3490_amount': sum_3490_amount,
                     'gift_count': gift_count,

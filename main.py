@@ -92,7 +92,7 @@ async def main() -> None:
     # scheduler.add_job(check_platega_crypto, trigger='interval', minutes=1, misfire_grace_time=10)
     # scheduler.add_job(check_wata_sbp, trigger='interval', minutes=1, misfire_grace_time=10)
     # scheduler.add_job(check_wata_card, trigger='interval', minutes=1, misfire_grace_time=10)
-    scheduler.add_job(check_fk, trigger='interval', minutes=1, misfire_grace_time=10)
+    # scheduler.add_job(check_fk, trigger='interval', minutes=1, misfire_grace_time=10)
     scheduler.add_job(check_cryptobot_payments, trigger='interval', minutes=1, misfire_grace_time=10)
     scheduler.add_job(send_push_cron, trigger='interval', minutes=30, misfire_grace_time=60)
     scheduler.add_job(

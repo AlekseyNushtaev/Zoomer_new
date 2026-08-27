@@ -26,6 +26,7 @@ def get_stars_amount(currency: str, duration: str) -> float:
             '120': 749,
             '180': 1349,
             '365': 2399,
+            '730': 3699,
             '5000': 4990,
             '5000sale': 2790,
             '30old': 99,
@@ -61,7 +62,10 @@ async def process_payment_stars(callback: CallbackQuery):
     dur_label = "30" if duration == "30secret" else duration
     if duration in ("5000", "5000sale"):
         dur_label = "Навсегда"
-    title = f"Оплата подписки {'в подарок другу ' if gift_flag else ''}на {dur_label} дней."
+    if duration == "730":
+        title = f"Оплата подписки {'в подарок другу ' if gift_flag else ''}на 2 года."
+    else:
+        title = f"Оплата подписки {'в подарок другу ' if gift_flag else ''}на {dur_label} дней."
     description = lexicon['payment_link'].format(wl_bonus="")
 
     await callback.answer()

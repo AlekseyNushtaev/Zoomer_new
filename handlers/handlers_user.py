@@ -437,7 +437,7 @@ async def process_payment_method_bonus(callback: CallbackQuery):
     )
 
 
-@router.callback_query(F.data.in_({'r_7', 'r_30', 'r_90', 'r_180', 'r_365'}))
+@router.callback_query(F.data.in_({'r_7', 'r_30', 'r_90', 'r_180', 'r_365', 'r_730'}))
 async def process_payment_method(callback: CallbackQuery):
     await callback.answer()
     tariff = callback.data
