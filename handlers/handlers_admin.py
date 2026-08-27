@@ -190,6 +190,35 @@ async def get_photo(message: Message):
     await message.answer(message.photo[-1].file_id)
 
 
+def _admin_custom_emoji_ids(message: Message) -> list[str]:
+    ids: list[str] = []
+    seen: set[str] = set()
+
+    def _add(eid: str | None) -> None:
+        if eid and eid not in seen:
+            seen.add(eid)
+            ids.append(eid)
+
+    for e in (*(message.entities or ()), *(message.caption_entities or ())):
+        if e.type == "custom_emoji":
+            _add(e.custom_emoji_id)
+
+    sticker = message.sticker
+    if sticker is not None:
+        _add(sticker.custom_emoji_id)
+
+    return ids
+
+
+def _message_has_custom_emoji(message: Message) -> bool:
+    return bool(_admin_custom_emoji_ids(message))
+
+
+@router.message(F.from_user.id.in_(ADMIN_IDS), _message_has_custom_emoji)
+async def get_custom_emoji(message: Message):
+    await message.answer("\n".join(_admin_custom_emoji_ids(message)))
+
+
 @router.message(Command(commands=['user']))
 async def user_info(message: Message):
 
