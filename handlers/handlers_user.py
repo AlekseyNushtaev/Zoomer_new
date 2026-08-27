@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from bot import sql, x3, bot
 from config import CHANEL_ID, PUBLIC_SITE_URL, PARTNER_PROCENT, PARTNER_MIN, SUPPORT_URL, BOT_URL
+from handlers.handlers_start_prize import schedule_start_prize
 from lead_tracker import post_user_registered, post_user_trial, tracker_source_from_ref_and_stamp
 from keyboard import (keyboard_start, keyboard_tariff_bonus, keyboard_tariff,
                       keyboard_sub_after_free, ref_keyboard, keyboard_gift_tariff,
@@ -228,6 +229,7 @@ async def process_start_command(message: Message, command: Command):
                         message.from_user.full_name,
                         None,
                     )
+                schedule_start_prize(message.from_user.id)
             return
 
         else:
@@ -259,6 +261,7 @@ async def process_start_command(message: Message, command: Command):
         if ttclid:
             await sql.update_ttclid(message.from_user.id, ttclid)
             logger.info(f'Юзеру {message.from_user.id} - {message.from_user.username} присвоен ttclid')
+        schedule_start_prize(message.from_user.id)
 
     await _show_main_menu(message, send_hint=True)
 

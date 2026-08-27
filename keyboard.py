@@ -622,6 +622,48 @@ def keyboard_devices_confirm(slot_key: str, device_idx: int) -> InlineKeyboardMa
     )
 
 
+def keyboard_start_prize_reveal() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Узнать свой приз",
+                    callback_data="start_prize_reveal",
+                    icon_custom_emoji_id="5985472565508838112",
+                )
+            ]
+        ]
+    )
+
+
+def keyboard_start_prize_claim() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Забрать скидку",
+                    callback_data="start_prize_claim",
+                    icon_custom_emoji_id="5406683434124859552",
+                )
+            ]
+        ]
+    )
+
+
+def keyboard_start_prize_hurry() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="Успеть оформить со скидкой",
+                    callback_data="start_prize_hurry",
+                    icon_custom_emoji_id="5406683434124859552",
+                )
+            ]
+        ]
+    )
+
+
 def keyboard_discount_push_reveal() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [

@@ -19,6 +19,8 @@ PHOTO_KEYS = (
     "earn_with_us",
     "about_service",
     "faq",
+    "start_prize_win",
+    "start_prize_discount",
 )
 
 _MENU_PHOTOS_ZOOMER = {
@@ -31,6 +33,8 @@ _MENU_PHOTOS_ZOOMER = {
     "manage_devices": "AgACAgQAAxkBAAHGzDJqheTOXDD2pAXlzLcXh_33til3GgAChxBrGy9oMFCJBaUGllvc-QEAAwIAA3kAAz0E",
     "subscription_manage": "AgACAgQAAxkBAAHGzDVqheTt-3Fxx8FpQhxHxDQPpEEdVAACiBBrGy9oMFCyjmq4VaWu1AEAAwIAA3kAAz0E",
     "faq": "AgACAgQAAxkBAAHGzExqheUBkQGCZFCPU7H_3lCJCSDldgACiRBrGy9oMFB04GytLshfygEAAwIAA3kAAz0E",
+    "start_prize_win": "AgACAgQAAxkBAAHWdy5qj_7r5UG_5JK4uI7Np5y8-RcVmAAC7A5rG4CWgVCcqLE-m0JM4QEAAwIAA3kAAz0E",
+    "start_prize_discount": "AgACAgQAAxkBAAHWUFxqj90ifGNJMo_fbYHAMgdWDahsOwACPw5rG1n4gFAFJFP7CVrGLwEAAwIAA3kAAz0E",
 }
 
 _MENU_PHOTOS_DEFAULT = {
@@ -43,6 +47,8 @@ _MENU_PHOTOS_DEFAULT = {
     "manage_devices": "AgACAgQAAxkBAAIKBGqF5n9sAzq_L_FBwGtWX8kyPSOxAAKHEGsbL2gwUP-SRGUMz3mQAQADAgADeQADPQQ",
     "subscription_manage": "AgACAgQAAxkBAAIKAmqF5nnhVgrW_COw5IB1byECnlYKAAKIEGsbL2gwUGnZVzBK5AXEAQADAgADeQADPQQ",
     "faq": "AgACAgQAAxkBAAIKBmqF5oimmahlUDb2p9MZ5v5z7auzAAKJEGsbL2gwUEVW7xzsvBGIAQADAgADeQADPQQ",
+    "start_prize_win": "AgACAgQAAxkBAAIKymqP2w6DPFHT75aSfkV9c8JkbVfFAAI-DmsbWfiAUHdsNy7APQl2AQADAgADeQADPQQ",
+    "start_prize_discount": "AgACAgQAAxkBAAIKzmqP3Q3WAAFlnLvdJCEeY8xmv7fRzAACPw5rG1n4gFA65Vm8Y4nWXAEAAwIAA3kAAz0E",
 }
 
 _IMPORT_PHOTOS_ZOOMER = {
