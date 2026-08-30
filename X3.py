@@ -1013,20 +1013,21 @@ class X3:
             return []
 
     async def get_node_uuid_by_name(self, node_name: str) -> Optional[str]:
-        """UUID ноды по имени (кэш на время жизни экземпляра X3)."""
+        """UUID ноды по имени без учёта регистра (кэш на время жизни экземпляра X3)."""
         cache: Dict[str, str] = getattr(self, "_node_uuid_by_name", {})
-        if node_name in cache:
-            return cache[node_name]
+        key = node_name.casefold()
+        if key in cache:
+            return cache[key]
 
         for node in await self.list_nodes():
             name = node.get("name") or node.get("nodeName") or ""
-            if name != node_name:
+            if name.casefold() != key:
                 continue
             node_uuid = node.get("uuid") or node.get("nodeUuid")
             if node_uuid:
-                cache[node_name] = str(node_uuid)
+                cache[key] = str(node_uuid)
                 self._node_uuid_by_name = cache
-                return cache[node_name]
+                return cache[key]
 
         logger.warning(f"get_node_uuid_by_name: нода «{node_name}» не найдена")
         return None

@@ -21,8 +21,8 @@ async def _resolve_billing_uid(username: str):
 
 async def accumulate_wl_traffic_cron() -> None:
     """
-    Закрывающий WL-день (до 03:00 — вчера по календарю): legacy bulk по белой ноде,
-    перевод в GB и прибавление к trafic_wl. Три retry при пустом ответе.
+    Закрывающий WL-день (до 03:00 — вчера по календарю): legacy bulk по всем белым нодам,
+    сумма GB и прибавление к trafic_wl. Три retry при пустом ответе.
     Повтор за уже закрытый день пропускается (wl_traffic_meta.last_closed_date).
     """
     try:

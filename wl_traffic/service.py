@@ -15,7 +15,7 @@ from wl_traffic.constants import (
     WL_GB_PER_MONTH,
     WL_LEGACY_RETRIES,
     WL_LOW_TRAFFIC_WARNING_GB,
-    WL_NODE_NAME,
+    WL_NODE_NAMES,
     WL_TOP_USERS_LIMIT,
     WL_SQUAD_ACTIVE,
     WL_SQUAD_LIMITED,
@@ -198,6 +198,31 @@ def aggregate_bandwidth_by_user_uuid(records: list[dict]) -> dict[str, float]:
     return totals
 
 
+async def _fetch_node_bandwidth_records(
+    x3,
+    node_name: str,
+    day_str: str,
+    retries: int,
+) -> list[dict] | None:
+    node_uuid = await x3.get_node_uuid_by_name(node_name)
+    if not node_uuid:
+        return None
+    for attempt in range(max(1, retries)):
+        records = await x3.get_node_users_bandwidth_legacy(
+            node_uuid, day_str, day_str, top_users_limit=WL_TOP_USERS_LIMIT,
+        )
+        if records:
+            return records
+        if attempt < retries - 1:
+            await asyncio.sleep(2.0 * (attempt + 1))
+    return None
+
+
+def _add_bytes(dst: dict[str, float], src: dict[str, float]) -> None:
+    for key, value in src.items():
+        dst[key] = dst.get(key, 0.0) + value
+
+
 async def fetch_wl_traffic_gb_for_day(
     x3,
     day: date | None = None,
@@ -205,33 +230,39 @@ async def fetch_wl_traffic_gb_for_day(
     retries: int = WL_LEGACY_RETRIES,
 ) -> tuple[dict[str, float], dict[str, float]]:
     """
-    Bulk legacy за один WL-день: (by_username_gb, by_user_uuid_gb).
-    retries — повторы при пустом ответе (для крона накопления).
+    Bulk legacy за один WL-день по всем белым нодам: (by_username_gb, by_user_uuid_gb).
+    Трафик одного пользователя на разных нодах суммируется.
+    retries — повторы при пустом ответе каждой ноды (для крона накопления).
     """
     day = day or wl_traffic_day()
     day_str = day.isoformat()
 
-    node_uuid = await x3.get_node_uuid_by_name(WL_NODE_NAME)
-    if not node_uuid:
+    results = await asyncio.gather(
+        *[
+            _fetch_node_bandwidth_records(x3, node_name, day_str, retries)
+            for node_name in WL_NODE_NAMES
+        ]
+    )
+
+    bytes_by_username: dict[str, float] = {}
+    bytes_by_uuid: dict[str, float] = {}
+    got_any = False
+
+    for records in results:
+        if not records:
+            continue
+        got_any = True
+        filtered = filter_records_for_day(records, day)
+        _add_bytes(bytes_by_username, aggregate_bandwidth_by_username(filtered))
+        _add_bytes(bytes_by_uuid, aggregate_bandwidth_by_user_uuid(filtered))
+
+    if not got_any:
         return {}, {}
 
-    for attempt in range(max(1, retries)):
-        records = await x3.get_node_users_bandwidth_legacy(
-            node_uuid, day_str, day_str, top_users_limit=WL_TOP_USERS_LIMIT,
-        )
-        if records:
-            filtered = filter_records_for_day(records, day)
-            by_username = {
-                u: bytes_to_gb(b) for u, b in aggregate_bandwidth_by_username(filtered).items()
-            }
-            by_uuid = {
-                u: bytes_to_gb(b) for u, b in aggregate_bandwidth_by_user_uuid(filtered).items()
-            }
-            return by_username, by_uuid
-        if attempt < retries - 1:
-            await asyncio.sleep(2.0 * (attempt + 1))
-
-    return {}, {}
+    return (
+        {u: bytes_to_gb(b) for u, b in bytes_by_username.items()},
+        {u: bytes_to_gb(b) for u, b in bytes_by_uuid.items()},
+    )
 
 
 def wl_traffic_gb_for_panel_user(

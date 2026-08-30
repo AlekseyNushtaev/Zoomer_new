@@ -130,7 +130,7 @@ async def check_wl_traffic_cron(bot: Bot) -> None:
         )
         if not traffic_by_username and not traffic_by_uuid:
             logger.warning(
-                f"check_wl_traffic: bulk-трафик WL-ноды за {day.isoformat()} не получен, пропуск"
+                f"check_wl_traffic: bulk-трафик WL-нод за {day.isoformat()} не получен, пропуск"
             )
             return
 

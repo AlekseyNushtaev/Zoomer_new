@@ -1,9 +1,13 @@
-"""Константы лимита трафика сервера Антиглушилка (белая нода)."""
+"""Константы лимита трафика сервера Антиглушилка (белые ноды)."""
 
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-WL_NODE_NAME = "YANDEX-RU-002"
+# Белые ноды Антиглушилка: расход суммируется по всем.
+WL_NODE_NAMES = (
+    "YANDEX-RU-002",
+    "Yandex-RU-003",
+)
 WL_TIMEZONE = ZoneInfo("Europe/Moscow")
 # Сутки WL-трафика: с 03:00 до 02:59 МСК (накопление в 02:57, проверка после 03:05).
 WL_DAY_RESET_HOUR = 3
