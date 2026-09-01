@@ -9,8 +9,9 @@ import openpyxl
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message, FSInputFile
-from openpyxl.styles import Alignment, Border, Side, PatternFill
+from openpyxl.styles import Alignment, Border, Side, PatternFill, Font
 from openpyxl.chart import LineChart, BarChart, Reference
+from openpyxl.utils import get_column_letter
 from sqlalchemy import select, func
 
 from bot import sql
@@ -39,6 +40,10 @@ for _checker_uid in CHECKER_IDS:
     REF_ZALIV.add(str(_checker_uid))
 
 EXCLUDE_IDS = list(range(45, 1046))
+
+_PAYMENT_OK_STATUSES = ("confirmed", "paid")
+_ANAL_PAY_MONTHS = (6, 7, 8)
+_ANAL_PAY_MONTH_RU = {6: "Июнь", 7: "Июль", 8: "Август"}
 
 
 # ---------- Вспомогательные функции конвертации ----------
@@ -73,6 +78,13 @@ def convert_crypto_to_rub(currency: str, amount: str) -> Optional[int]:
         'USDT': {'1.3': 99, '3.5': 269, '4.0': 299, '6.5': 499}
     }
     return mapping.get(currency, {}).get(amount)
+
+
+def _stars_amount_to_rub(amount) -> Optional[int]:
+    if amount is None:
+        return None
+    mapped = convert_stars_to_rub(int(amount))
+    return mapped if mapped is not None else int(amount)
 
 
 class PaymentRecord:
@@ -236,6 +248,106 @@ def _sync_build_analytics_excel(monthly_data: dict, daily_data_by_month: dict) -
         chart2.add_data(data2, titles_from_data=True)
         chart2.set_categories(dates)
         ws.add_chart(chart2, "J20")
+
+    fd, path = tempfile.mkstemp(suffix='.xlsx')
+    os.close(fd)
+    wb.save(path)
+    return path
+
+
+def _sync_build_anal_payment_excel(year: int, daily_by_month: dict) -> str:
+    wb = openpyxl.Workbook()
+    ws_data = wb.active
+    ws_data.title = "Данные"
+
+    thin_border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin'),
+    )
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+    total_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+
+    ws_data.append(
+        ["День"] + [f"{_ANAL_PAY_MONTH_RU[m]} {year}, ₽" for m in _ANAL_PAY_MONTHS]
+    )
+
+    last_days = {m: calendar.monthrange(year, m)[1] for m in _ANAL_PAY_MONTHS}
+    max_day = max(last_days.values())
+
+    for day in range(1, max_day + 1):
+        row = [day]
+        for m in _ANAL_PAY_MONTHS:
+            if day <= last_days[m]:
+                row.append(int(daily_by_month.get(m, {}).get(day, 0)))
+            else:
+                row.append(None)
+        ws_data.append(row)
+
+    totals = ["Итого"]
+    for col_idx, m in enumerate(_ANAL_PAY_MONTHS, start=2):
+        col_letter = get_column_letter(col_idx)
+        totals.append(f"=SUM({col_letter}2:{col_letter}{last_days[m] + 1})")
+    ws_data.append(totals)
+    total_row = max_day + 2
+
+    for col in range(1, 5):
+        cell = ws_data.cell(row=1, column=col)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = thin_border
+
+    for r in range(2, total_row + 1):
+        for c in range(1, 5):
+            cell = ws_data.cell(row=r, column=c)
+            cell.border = thin_border
+            cell.alignment = Alignment(horizontal="center")
+            if r == total_row:
+                cell.fill = total_fill
+                cell.font = Font(bold=True)
+            if c > 1:
+                cell.number_format = '#,##0'
+
+    for col in ws_data.columns:
+        max_len = 0
+        col_letter = col[0].column_letter
+        for cell in col:
+            if cell.value is not None:
+                max_len = max(max_len, len(str(cell.value)))
+        ws_data.column_dimensions[col_letter].width = min(max(max_len + 2, 16), _EXCEL_COL_WIDTH_MAX)
+
+    ws_charts = wb.create_sheet("Графики", 0)
+    ws_charts.sheet_view.showGridLines = False
+    wb.active = ws_charts
+
+    chart_fills = ("5B9BD5", "70AD47", "ED7D31")
+    chart_row = 1
+    for idx, month in enumerate(_ANAL_PAY_MONTHS):
+        days = last_days[month]
+        month_total = sum(daily_by_month.get(month, {}).get(d, 0) for d in range(1, days + 1))
+        total_label = f"{month_total:,}".replace(",", " ")
+        chart = BarChart()
+        chart.type = "col"
+        chart.grouping = "clustered"
+        chart.title = f"{_ANAL_PAY_MONTH_RU[month]} {year} — {total_label} ₽"
+        chart.y_axis.title = "Платежи, ₽"
+        chart.x_axis.title = "День"
+        chart.y_axis.numFmt = '#,##0'
+        chart.style = 10
+        chart.legend = None
+        chart.width = 22
+        chart.height = 10
+        data = Reference(ws_data, min_col=idx + 2, min_row=1, max_row=days + 1)
+        cats = Reference(ws_data, min_col=1, min_row=2, max_row=days + 1)
+        chart.add_data(data, titles_from_data=True)
+        chart.set_categories(cats)
+        if chart.series:
+            chart.series[0].graphicalProperties.solidFill = chart_fills[idx]
+        ws_charts.add_chart(chart, f"A{chart_row}")
+        chart_row += 20
 
     fd, path = tempfile.mkstemp(suffix='.xlsx')
     os.close(fd)
@@ -794,4 +906,104 @@ async def analytics_export(message: Message):
 
     except Exception as e:
         logger.exception("Ошибка при экспорте помесячной аналитики")
+        await message.answer(f"❌ Ошибка: {str(e)}")
+
+
+@router.message(Command(commands=['anal_payment']))
+async def anal_payment_export(message: Message):
+    if message.from_user.id not in ADMIN_IDS:
+        await message.answer("❌ Команда доступна только администраторам.")
+        return
+
+    await message.answer("🔄 Формирую графики платежей за июнь–август...")
+
+    try:
+        now = datetime.now()
+        year = now.year if now.month >= 6 else now.year - 1
+        start_date = datetime(year, 6, 1, 0, 0, 0)
+        end_date = datetime(year, 8, 31, 23, 59, 59)
+
+        last_days = {m: calendar.monthrange(year, m)[1] for m in _ANAL_PAY_MONTHS}
+        daily_by_month = {
+            m: {d: 0 for d in range(1, last_days[m] + 1)}
+            for m in _ANAL_PAY_MONTHS
+        }
+
+        def _add(dt, rub):
+            if dt is None or rub is None:
+                return
+            if dt.year != year or dt.month not in daily_by_month:
+                return
+            day = dt.day
+            if day in daily_by_month[dt.month]:
+                daily_by_month[dt.month][day] += int(rub)
+
+        async with AsyncSessionLocal() as session:
+            rub_models = (
+                Payments,
+                PaymentsCards,
+                PaymentsPlategaCrypto,
+                PaymentsWataSBP,
+                PaymentsWataCard,
+                PaymentsFkSBP,
+            )
+            for model in rub_models:
+                stmt = select(model.time_created, model.amount).where(
+                    model.status.in_(_PAYMENT_OK_STATUSES),
+                    model.time_created.between(start_date, end_date),
+                )
+                for tc, amt in (await session.execute(stmt)).all():
+                    _add(tc, amt)
+
+            stmt_stars = select(PaymentsStars.time_created, PaymentsStars.amount).where(
+                PaymentsStars.status.in_(_PAYMENT_OK_STATUSES),
+                PaymentsStars.time_created.between(start_date, end_date),
+            )
+            for tc, amt in (await session.execute(stmt_stars)).all():
+                _add(tc, _stars_amount_to_rub(amt))
+
+            stmt_crypto = select(
+                PaymentsCryptobot.time_created,
+                PaymentsCryptobot.amount,
+                PaymentsCryptobot.currency,
+            ).where(
+                PaymentsCryptobot.status.in_(_PAYMENT_OK_STATUSES),
+                PaymentsCryptobot.time_created.between(start_date, end_date),
+            )
+            for tc, amt, cur in (await session.execute(stmt_crypto)).all():
+                _add(tc, convert_crypto_to_rub(cur, str(amt)))
+
+        export_path = await asyncio.to_thread(
+            _sync_build_anal_payment_excel, year, daily_by_month
+        )
+        june_sum = sum(daily_by_month[6].values())
+        july_sum = sum(daily_by_month[7].values())
+        aug_sum = sum(daily_by_month[8].values())
+
+        def _fmt_rub(n: int) -> str:
+            return f"{n:,}".replace(",", " ")
+
+        try:
+            await message.answer_document(
+                document=FSInputFile(
+                    export_path,
+                    filename=f"anal_payment_{year}_06-08.xlsx",
+                ),
+                caption=(
+                    f"📊 Платежи по дням, {year}\n"
+                    f"Июнь: {_fmt_rub(june_sum)} ₽\n"
+                    f"Июль: {_fmt_rub(july_sum)} ₽\n"
+                    f"Август: {_fmt_rub(aug_sum)} ₽"
+                ),
+            )
+        finally:
+            try:
+                os.remove(export_path)
+            except OSError:
+                pass
+
+        logger.info(f"Админ {message.from_user.id} выгрузил /anal_payment за {year}")
+
+    except Exception as e:
+        logger.exception("Ошибка при экспорте /anal_payment")
         await message.answer(f"❌ Ошибка: {str(e)}")
