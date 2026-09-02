@@ -57,6 +57,7 @@ CATEGORY_LABELS = {
     "connected_subscribe_yes": "подключены, подписка активна",
     "not_subscribed": "без подписки в панели",
     "connected_never_paid": "подключены, никогда не платили",
+    "paid_at_most_once": "нет оплат или одна оплата подписки",
     "subscribed_all": "есть подписка в панели",
     "never_bought_forever": "не покупали тариф Навсегда",
     "all_users": "все пользователи",

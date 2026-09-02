@@ -1,7 +1,7 @@
 import time
 import uuid
 
-from sqlalchemy import select, update, delete, func, and_, or_, cast, Date, text
+from sqlalchemy import select, update, delete, func, and_, or_, cast, Date, text, union_all
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from datetime import datetime, date, timedelta, timezone
 from typing import Any, Optional, List, Tuple, Dict
@@ -1481,6 +1481,33 @@ class AsyncSQL:
             .subquery()
         )
 
+    @staticmethod
+    def _subscription_payment_cond(table):
+        """Успешная оплата своей подписки: не подарок и не докупка трафика Антиглушилка."""
+        return and_(
+            table.status.in_(_BILLING_OK_STATUSES),
+            or_(table.is_gift.is_(False), table.is_gift.is_(None)),
+            or_(
+                table.payload.is_(None),
+                ~table.payload.like("%duration:traffic%"),
+            ),
+        )
+
+    def _users_with_multiple_subscription_pays_subquery(self):
+        """user_id с двумя и более успешными оплатами подписки (все платёжные таблицы)."""
+        cond = self._subscription_payment_cond
+        parts = [
+            select(model.user_id).where(cond(model))
+            for model in _MERGE_PAYMENT_MODELS
+        ]
+        rows = union_all(*parts).subquery()
+        return (
+            select(rows.c.user_id)
+            .group_by(rows.c.user_id)
+            .having(func.count() > 1)
+            .subquery()
+        )
+
     def _build_broadcast_where(self, category: str, exclude_today: bool):
         """
         Условие выборки пользователей для рассылки.
@@ -1576,6 +1603,14 @@ class AsyncSQL:
                     Users.in_panel == True,
                     Users.subscription_end_date != None,
                     Users.is_delete == False,
+                )
+            )
+        if category == "paid_at_most_once":
+            multi_paid = self._users_with_multiple_subscription_pays_subquery()
+            return wrap(
+                and_(
+                    Users.is_delete == False,
+                    Users.user_id.notin_(multi_paid),
                 )
             )
         if category == "never_bought_forever":
