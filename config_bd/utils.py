@@ -1244,29 +1244,6 @@ class AsyncSQL:
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]
 
-    async def SELECT_USER_IDS_NO_ACTIVE_PRO_SUBSCRIPTION(self) -> List[int]:
-        """
-        Не удалены; нет PRO-подписки (subscription_end_date пусто)
-        или календарный день окончания (UTC) не позже чем 2 дня назад от сегодня UTC.
-        """
-        today_utc = datetime.now(timezone.utc).date()
-        cutoff_utc = today_utc - timedelta(days=2)
-        eligible = or_(
-            Users.subscription_end_date.is_(None),
-            cast(Users.subscription_end_date, Date) <= cutoff_utc,
-        )
-        async with self.session_factory() as session:
-            stmt = (
-                select(Users.user_id)
-                .where(
-                    Users.is_delete == False,
-                    eligible,
-                )
-                .order_by(Users.user_id)
-            )
-            result = await session.execute(stmt)
-            return [row[0] for row in result.all()]
-
     async def select_rows_for_subscription_expiry_push(
         self, now_utc_naive: datetime, window: timedelta
     ) -> List[Tuple[int, datetime, bool, Optional[str], Optional[str]]]:

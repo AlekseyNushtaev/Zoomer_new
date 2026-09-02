@@ -5,7 +5,6 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from config import BOT_URL
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from lexicon import dct_price_discount_33
 
 STYLE_PRIMARY = "primary"
 STYLE_SUCCESS = "success"
@@ -662,75 +661,6 @@ def keyboard_start_prize_hurry() -> InlineKeyboardMarkup:
             ]
         ]
     )
-
-
-def keyboard_discount_push_reveal() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="🎁 Узнать награду",
-                callback_data="dpush_reveal",
-            )
-        ],
-    ])
-
-
-def keyboard_discount_push_buy() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="⚡ Купить со скидкой",
-                callback_data="dpush_buy",
-            )
-        ],
-    ])
-
-
-def keyboard_discount_push_tariffs() -> InlineKeyboardMarkup:
-    p = dct_price_discount_33
-    return create_kb(
-        1,
-        dpush_tariff_7=f'👌 7 дней — {p["7"]} руб',
-        dpush_tariff_30=f'🤝 30 дней — {p["30"]} руб',
-        dpush_tariff_90=f'✅ 90 дней — {p["90"]} руб (выгода −17%)',
-        dpush_tariff_180=f'🏆 180 дней — {p["180"]} руб (выгода −25%)',
-        dpush_tariff_365=f'💎 365 дней — {p["365"]} руб (выгода −33%)',
-    )
-
-
-def keyboard_discount_push_payment(duration: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="⚡СБП",
-                callback_data=f"dpush_wata_sbp_{duration}",
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text="💳 Карта РФ",
-                callback_data=f"dpush_wata_card_{duration}",
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text="⭐️ Telegram Stars",
-                callback_data=f"dpush_stars_{duration}",
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text="💎 Crypto bot",
-                callback_data=f"dpush_crypto_{duration}",
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text="🔙 Назад",
-                callback_data="dpush_back_tariffs",
-            )
-        ],
-    ])
 
 
 def keyboard_partner_withdraw(support_url: str):

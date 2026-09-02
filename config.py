@@ -98,6 +98,3 @@ PARTNER_VPS_IP: str = (os.environ.get("PARTNER_VPS_IP") or "").strip().rstrip("/
 PARTNER_VPS_API_KEY: Optional[str] = (os.environ.get("PARTNER_VPS_API_KEY") or "").strip() or None
 TOKEN_ENCRYPTION_KEY: Optional[str] = (os.environ.get("TOKEN_ENCRYPTION_KEY") or "").strip() or None
 PARTNER_BOT_API_KEY: Optional[str] = (os.environ.get("PARTNER_BOT_API_KEY") or "").strip() or None
-
-# file_id картинки для рассылки /discount_push
-DISCOUNT_PUSH_PHOTO_ID: str = (os.environ.get("DISCOUNT_PUSH_PHOTO_ID") or "AgACAgQAAxkBAAGVGvtqS5S-0aeKvv12VzVmhQiLYk_sVQACIw9rG_v1YVLiP0U06pHvWAEAAwIAA3gAAzwE").strip()

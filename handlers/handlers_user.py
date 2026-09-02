@@ -10,7 +10,7 @@ from keyboard import (keyboard_start, keyboard_tariff_bonus, keyboard_tariff,
                       keyboard_payment_method, keyboard_payment_method_stock, chanel_keyboard, create_kb,
                       keyboard_inline_ref, keyboard_partner_intro, keyboard_partner_dashboard,
                       keyboard_partner_withdraw, keyboard_buy_menu, keyboard_earn_with_us,
-                      STYLE_PRIMARY, OPEN_SITE_CB, SITE_URL,
+                      OPEN_SITE_CB, SITE_URL,
                       keyboard_trial_existing_expired, keyboard_subscription_manage,
                       keyboard_about_service, ABOUT_SERVICE_CB, BTN_BACK)
 from utils.menu_ui import (
@@ -52,10 +52,9 @@ from wl_traffic.texts import format_pro_payment_link
 
 router: Router = Router()
 
-_TRIAL_RETURN_GET_CB = "trial_return_get"
 # индексы в кортеже get_user (_user_tuple)
+_USER_TUPLE_RESERVE_FIELD = 8
 _USER_TUPLE_SUBSCRIPTION_END_DATE = 9
-_USER_TUPLE_FIELD_BOOL_3 = 26
 
 
 async def _show_main_menu(
@@ -359,47 +358,6 @@ async def direct_connect_vpn_cb(callback: CallbackQuery):
     await _show_connect_screen(callback)
 
 
-@router.callback_query(F.data == _TRIAL_RETURN_GET_CB)
-async def trial_return_get_cb(callback: CallbackQuery):
-    uid = callback.from_user.id
-    user_data = await sql.get_user(uid)
-    if user_data is None:
-        await sql.add_user(uid, False)
-        user_data = await sql.get_user(uid)
-
-    if user_data[_USER_TUPLE_FIELD_BOOL_3]:
-        await callback.answer("Вы уже взяли свой триал!", show_alert=True)
-        return
-
-    await callback.answer()
-
-    user_id_str = str(uid)
-    panel_user = await x3.get_user_by_username(user_id_str)
-    if panel_user and panel_user.get("response"):
-        ok = await x3.updateClient(7, user_id_str, uid)
-    else:
-        ok = await x3.addClient(7, user_id_str, uid)
-
-    if not ok:
-        await callback.message.answer(
-            "Не удалось начислить дни. Попробуйте позже или напишите в поддержку."
-        )
-        return
-
-    await sql.update_in_panel(uid)
-    await sql.update_field_bool_3(uid, True)
-    await sql.init_wl_trial_limits(uid)
-    await post_user_trial(uid)
-    await callback.message.answer(
-        "🎉 Поздравляем! Вы получили 7 триальных дней доступа к ВПН! ✨🔐",
-        reply_markup=create_kb(
-            1,
-            styles={"connect_vpn": STYLE_PRIMARY},
-            connect_vpn="🔗 Подключить VPN",
-        ),
-    )
-
-
 @router.callback_query(F.data == "r_30secret")
 async def secret_tariff_payment(callback: CallbackQuery):
     uid = callback.from_user.id
@@ -407,7 +365,7 @@ async def secret_tariff_payment(callback: CallbackQuery):
     if user_data is None:
         await sql.add_user(uid, False)
         user_data = await sql.get_user(uid)
-    if user_data is not None and user_data[_USER_TUPLE_FIELD_BOOL_3]:
+    if user_data is not None and user_data[_USER_TUPLE_RESERVE_FIELD]:
         await callback.answer(
             "Вы уже воспользовались секретным тарифом!",
             show_alert=True,
