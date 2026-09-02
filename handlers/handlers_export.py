@@ -949,12 +949,16 @@ def _build_trafic_stat_xlsx(
     pays_by_user: dict[int, list[tuple[datetime, dict]]] = defaultdict(list)
     sub_days_by_user: dict[int, list[tuple[datetime, int]]] = defaultdict(list)
     forever_paid: set[int] = set()
+    traffic_paid: set[int] = set()
 
     for uid, tc, amt, pl, ig, channel, currency in payments:
         item = _classify_trafic_stat_payment(pl, ig, amt, channel, currency)
         if item is None:
             continue
         pays_by_user[uid].append((tc, item))
+        if item["kind"] == "traffic":
+            traffic_paid.add(uid)
+            continue
         if item["kind"] == "subscription" and not item["white"] and item["days"]:
             sub_days_by_user[uid].append((tc, int(item["days"])))
             if is_forever_duration(int(item["days"])):
@@ -962,7 +966,7 @@ def _build_trafic_stat_xlsx(
 
     rows_out: list[tuple] = []
     for uid, linked, current_end, trafic_wl, limit_wl in users:
-        if uid in forever_paid:
+        if uid in forever_paid or uid in traffic_paid:
             continue
         snap_end = _end_date_as_of_snapshot(current_end, sub_days_by_user.get(uid, []), snapshot)
         if snap_end is None or snap_end.date() < snapshot:
@@ -1101,10 +1105,10 @@ async def trafic_stat_excel(message: Message):
                 document=FSInputFile(path, filename=fname),
                 caption=(
                     f"Пользователей с подпиской VPN PRO на 13.08.2026 дольше 2 недель: {n_rows}. "
-                    "Без тарифа «Навсегда». "
+                    "Без тарифа «Навсегда» и без оплат трафика. "
                     "Дата окончания на 13.08 = текущая дата в БД минус дни подписки, купленные после 13.08. "
                     "Зелёный: текущая дата окончания позже сейчас; trafic_wl больше 7 ГБ. "
-                    "Покупки: успешные платежи (подписка и трафик), не подарки."
+                    "Покупки: успешные платежи (подписка), не подарки."
                 ),
             )
         finally:
