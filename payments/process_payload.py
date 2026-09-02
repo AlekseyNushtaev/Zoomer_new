@@ -465,6 +465,8 @@ async def process_confirmed_payment(
             else:
                 await sql.add_user(db_uid, True)
             await sql.update_reserve_field(db_uid)
+            if raw_duration == "120":
+                await sql.update_field_bool_3(db_uid, True)
 
             if not white_flag:
                 bonus_gb = subscription_bonus_gb(duration)

@@ -7,7 +7,7 @@ from handlers.handlers_start_prize import schedule_start_prize
 from lead_tracker import post_user_registered, post_user_trial, tracker_source_from_ref_and_stamp
 from keyboard import (keyboard_start, keyboard_tariff_bonus, keyboard_tariff,
                       keyboard_sub_after_free, ref_keyboard, keyboard_gift_tariff,
-                      keyboard_payment_method, keyboard_payment_method_stock, chanel_keyboard, create_kb,
+                      keyboard_payment_method, chanel_keyboard, create_kb,
                       keyboard_inline_ref, keyboard_partner_intro, keyboard_partner_dashboard,
                       keyboard_partner_withdraw, keyboard_buy_menu, keyboard_earn_with_us,
                       OPEN_SITE_CB, SITE_URL,
@@ -55,6 +55,7 @@ router: Router = Router()
 # индексы в кортеже get_user (_user_tuple)
 _USER_TUPLE_RESERVE_FIELD = 8
 _USER_TUPLE_SUBSCRIPTION_END_DATE = 9
+_USER_TUPLE_FIELD_BOOL_3 = 26
 
 
 async def _show_main_menu(
@@ -114,6 +115,15 @@ _SECRET_TARIFF_PAYMENT_TEXT = (
     "4 сервера из разных стран на выбор.\n"
     "5 устройств, безлимитный трафик.\n\n"
     "СКИДКА 40% - 149 руб за месяц\n\n"
+    "Выберите способ оплаты:"
+)
+
+_R120_PAYMENT_TEXT = (
+    "🎁 Акция: 3 + 1 месяц в подарок!\n"
+    "Множество серверов из разных стран на выбор.\n"
+    "5 устройств, безлимитный трафик на обычные сервера.\n\n"
+    "📡 Антиглушилка: <b>+40 GB</b> трафика включено в тариф.\n\n"
+    "<b>Подписка начисляется в течении 1 часа</b>\n\n"
     "Выберите способ оплаты:"
 )
 
@@ -382,19 +392,27 @@ async def secret_tariff_payment(callback: CallbackQuery):
 
 @router.callback_query(F.data == 'r_120')
 async def process_payment_method_bonus(callback: CallbackQuery):
-    user_data = await sql.get_user(callback.from_user.id)
-    if user_data and user_data[8]:
-        await callback.answer()
-        await callback.message.answer(
-            'Акция действительна только при первой оплате.',
-            reply_markup=create_kb(1, back_to_main='🔙 Назад'),
+    uid = callback.from_user.id
+    user_data = await sql.get_user(uid)
+    if user_data is None:
+        await sql.add_user(uid, False)
+        user_data = await sql.get_user(uid)
+    if (
+        user_data is not None
+        and len(user_data) > _USER_TUPLE_FIELD_BOOL_3
+        and user_data[_USER_TUPLE_FIELD_BOOL_3]
+    ):
+        await callback.answer(
+            "Вы уже воспользовались этой акцией!",
+            show_alert=True,
         )
         return
     await callback.answer()
-    tariff = callback.data
-    await callback.message.answer(
-        'Выберите метод оплаты акционной подписки:',
-        reply_markup=keyboard_payment_method_stock(tariff),
+    await edit_or_send_photo(
+        callback,
+        "buy_subscription",
+        _R120_PAYMENT_TEXT,
+        keyboard_payment_method("r_120"),
     )
 
 
