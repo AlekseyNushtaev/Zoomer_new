@@ -7,10 +7,10 @@ from typing import Any, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import openpyxl
-from aiogram import Router
+from aiogram import F, Router
 from openpyxl.styles import Alignment, Border, Side, PatternFill
 
-from bot import sql, x3
+from bot import bot, sql, x3
 from config import ADMIN_IDS
 from config_bd.models import Users
 from config_bd.utils import (
@@ -18,10 +18,25 @@ from config_bd.utils import (
     _parse_traffic_duration,
     _payload_duration_to_panel_days,
 )
+from keyboard import STYLE_DANGER, STYLE_PRIMARY, STYLE_SUCCESS
 from logging_config import logger
-from aiogram.types import Message, FSInputFile
+from aiogram.types import (
+    CallbackQuery,
+    FSInputFile,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 from aiogram.filters import Command
-from wl_traffic.service import is_forever_duration, is_forever_end_date
+from telegram_ids import is_telegram_chat_id
+from wl_traffic.service import (
+    fetch_panel_user,
+    is_forever_duration,
+    is_forever_end_date,
+    reassign_to_active_squad,
+    resolve_panel_username,
+    user_on_active_squad,
+)
 
 router = Router()
 
@@ -773,6 +788,28 @@ _TRAFFIC_STAT_SNAPSHOT = date(2026, 8, 13)
 _TRAFFIC_STAT_MIN_REMAINING_DAYS = 14
 _TRAFFIC_STAT_TRAFFIC_GB = 7
 _TRAFFIC_STAT_GREEN = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
+_TRAFFIC_STAT_YES_CB = "trafic_stat_yes"
+_TRAFFIC_STAT_NO_CB = "trafic_stat_no"
+_TRAFFIC_STAT_PROGRESS_EVERY = 50
+_TRAFFIC_STAT_PREVIEW_GB = 10
+_TRAFFIC_STAT_PENDING: dict[int, list[tuple[int, int, float]]] = {}
+_TRAFFIC_STAT_RUNNING: set[int] = set()
+_TRAFFIC_STAT_CONFIRM_KB = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="Да, разослать всем",
+                callback_data=_TRAFFIC_STAT_YES_CB,
+                style=STYLE_SUCCESS,
+            ),
+            InlineKeyboardButton(
+                text="Нет",
+                callback_data=_TRAFFIC_STAT_NO_CB,
+                style=STYLE_DANGER,
+            ),
+        ]
+    ]
+)
 
 
 def _payload_map(payload: Optional[str]) -> dict[str, str]:
@@ -942,7 +979,7 @@ def _trafic_stat_tg_id(user_id: int, linked: Optional[int]) -> int:
 def _build_trafic_stat_xlsx(
     users: List[Tuple[int, Optional[int], Optional[datetime], float, float]],
     payments: List[Tuple[int, datetime, Any, Optional[str], bool, str, Optional[str]]],
-) -> Tuple[str, int]:
+) -> Tuple[str, int, list[tuple[int, int, float]]]:
     snapshot = _TRAFFIC_STAT_SNAPSHOT
     now_msk = datetime.now(MSK).replace(tzinfo=None)
 
@@ -965,6 +1002,7 @@ def _build_trafic_stat_xlsx(
                 forever_paid.add(uid)
 
     rows_out: list[tuple] = []
+    apply_rows: list[tuple[int, int, float]] = []
     for uid, linked, current_end, trafic_wl, limit_wl in users:
         if uid in forever_paid or uid in traffic_paid:
             continue
@@ -983,12 +1021,14 @@ def _build_trafic_stat_xlsx(
         if not still_active or not high_traffic:
             continue
         recalc_gb = round(remaining_days / 30.0 * 10.0, 2)
+        tg_id = _trafic_stat_tg_id(uid, linked)
         purchases = [
             _format_trafic_stat_purchase(_payment_msk_date(_utc_naive(tc)), item)
             for tc, item in sorted(pays_by_user.get(uid, []), key=lambda x: _utc_naive(x[0]))
         ]
+        apply_rows.append((uid, tg_id, recalc_gb))
         rows_out.append((
-            _trafic_stat_tg_id(uid, linked),
+            tg_id,
             snap_end.strftime("%d.%m.%y"),
             current.strftime("%d.%m.%y") if current else "",
             "True" if still_active else None,
@@ -1002,6 +1042,7 @@ def _build_trafic_stat_xlsx(
         ))
 
     rows_out.sort(key=lambda r: r[0])
+    apply_rows.sort(key=lambda r: r[1] if r[1] else r[0])
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -1084,7 +1125,58 @@ def _build_trafic_stat_xlsx(
     fd, path = tempfile.mkstemp(suffix=".xlsx")
     os.close(fd)
     wb.save(path)
-    return path, len(rows_out)
+    return path, len(rows_out), apply_rows
+
+
+def _trafic_stat_gb_label(gb: float) -> str:
+    n = round(float(gb), 2)
+    if n == int(n):
+        return str(int(n))
+    return f"{n:.2f}"
+
+
+def _trafic_stat_push_text(gb: float) -> str:
+    gb_s = _trafic_stat_gb_label(gb)
+    return (
+        "📊 ПЕРЕРАСЧЕТ ЛИМИТА ТРАФИКА\n"
+        "\n"
+        f"✅ Вам добавлено трафика на {gb_s} ГБ для сервера «Антиглушилка».\n"
+        "\n"
+        "🛡️ О сервере: Специальное решение для обхода «белых списков» операторов "
+        "и борьбы с глушением VPN на мобильном интернете.\n"
+        "\n"
+        "📲 Что делать: Просто обновите подписку в вашем приложении, "
+        "и сервер появится в общем списке для подключения.\n"
+        "\n"
+        "👇 Доступ уже ждет вас!"
+    )
+
+
+def _trafic_stat_connect_kb(sub_url: str) -> Optional[InlineKeyboardMarkup]:
+    if not sub_url:
+        return None
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔗 Подключить VPN",
+                    url=sub_url,
+                    style=STYLE_PRIMARY,
+                )
+            ]
+        ]
+    )
+
+
+async def _trafic_stat_sub_url(
+    billing_uid: int,
+    panel_user: Optional[dict] = None,
+) -> str:
+    raw = (panel_user or {}).get("subscriptionUrl") or ""
+    if raw:
+        return str(raw)
+    username = await resolve_panel_username(sql, billing_uid)
+    return (await x3.sublink(username)) or ""
 
 
 @router.message(Command(commands=["trafic_stat", "traffic_stat"]))
@@ -1093,15 +1185,19 @@ async def trafic_stat_excel(message: Message):
     if message.from_user.id not in ADMIN_IDS:
         return
 
+    admin_id = message.from_user.id
     await message.answer("🔄 Собираю выборку /trafic_stat и формирую Excel…")
     try:
         users, payments = await sql.get_trafic_stat_source()
-        path, n_rows = await asyncio.to_thread(_build_trafic_stat_xlsx, users, payments)
+        path, n_rows, apply_rows = await asyncio.to_thread(
+            _build_trafic_stat_xlsx, users, payments
+        )
         if n_rows == 0:
             try:
                 os.remove(path)
             except OSError:
                 pass
+            _TRAFFIC_STAT_PENDING.pop(admin_id, None)
             await message.answer(
                 "Нет пользователей: активная подписка сейчас, на 13.08 дольше 2 недель, "
                 "trafic_wl > 7 ГБ, без «Навсегда» и без оплат трафика."
@@ -1124,10 +1220,159 @@ async def trafic_stat_excel(message: Message):
                 os.remove(path)
             except OSError:
                 pass
-        logger.info(f"Администратор {message.from_user.id} выгрузил /trafic_stat ({n_rows})")
+
+        _TRAFFIC_STAT_PENDING[admin_id] = apply_rows
+        n_push = sum(1 for _, tg_id, _gb in apply_rows if is_telegram_chat_id(tg_id))
+        preview_url = await _trafic_stat_sub_url(admin_id)
+        if not preview_url and apply_rows:
+            preview_url = await _trafic_stat_sub_url(apply_rows[0][0])
+        await message.answer("Пример пуша (10 ГБ):")
+        await message.answer(
+            _trafic_stat_push_text(_TRAFFIC_STAT_PREVIEW_GB),
+            reply_markup=_trafic_stat_connect_kb(preview_url),
+        )
+        await message.answer(
+            f"Разослать по выборке: <b>{n_rows}</b> чел. "
+            f"(пуш уйдёт {n_push}, у кого есть Telegram id).\n"
+            "Каждому: сквад с белой нодой, +пересчитанный трафик в limit_wl, пуш.\n\n"
+            "Подтвердите рассылку по всем пользователям из Excel.",
+            reply_markup=_TRAFFIC_STAT_CONFIRM_KB,
+        )
+        logger.info(f"Администратор {admin_id} выгрузил /trafic_stat ({n_rows})")
     except Exception as e:
         logger.exception("Ошибка /trafic_stat")
         await message.answer(f"❌ Ошибка при выгрузке: {e}")
+
+
+@router.callback_query(F.data == _TRAFFIC_STAT_NO_CB)
+async def trafic_stat_cancel(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+    _TRAFFIC_STAT_PENDING.pop(callback.from_user.id, None)
+    await callback.answer()
+    await callback.message.edit_text("Рассылка /trafic_stat отменена.", reply_markup=None)
+
+
+@router.callback_query(F.data == _TRAFFIC_STAT_YES_CB)
+async def trafic_stat_confirm(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+
+    admin_id = callback.from_user.id
+    if admin_id in _TRAFFIC_STAT_RUNNING:
+        await callback.answer("Рассылка уже идёт.", show_alert=True)
+        return
+
+    apply_rows = _TRAFFIC_STAT_PENDING.pop(admin_id, None)
+    if not apply_rows:
+        await callback.answer()
+        await callback.message.edit_text(
+            "Список пуст. Повторите /trafic_stat.",
+            reply_markup=None,
+        )
+        return
+
+    await callback.answer()
+    total = len(apply_rows)
+    await callback.message.edit_text(
+        f"⏳ /trafic_stat: обработка {total} пользователей…",
+        reply_markup=None,
+    )
+
+    _TRAFFIC_STAT_RUNNING.add(admin_id)
+    admin_chat_id = callback.message.chat.id
+    squad_moved = 0
+    squad_already = 0
+    squad_failed = 0
+    limit_ok = 0
+    limit_failed = 0
+    pushed = 0
+    push_failed = 0
+    skipped_non_tg = 0
+
+    try:
+        for processed, (billing_uid, tg_id, recalc_gb) in enumerate(apply_rows, start=1):
+            if processed % _TRAFFIC_STAT_PROGRESS_EVERY == 0:
+                try:
+                    await bot.send_message(
+                        admin_chat_id,
+                        f"trafic_stat: {processed} / {total}, "
+                        f"limit {limit_ok}, squad {squad_moved}, push {pushed}",
+                    )
+                except Exception as notify_err:
+                    logger.warning(
+                        "trafic_stat: не удалось отправить прогресс админу: %s",
+                        notify_err,
+                    )
+
+            try:
+                await sql.add_wl_limit(billing_uid, recalc_gb)
+                limit_ok += 1
+            except Exception as e:
+                limit_failed += 1
+                logger.warning(
+                    "trafic_stat: add_wl_limit uid=%s gb=%s: %s",
+                    billing_uid,
+                    recalc_gb,
+                    e,
+                )
+
+            panel_user = await fetch_panel_user(x3, billing_uid, sql=sql)
+            if not panel_user:
+                squad_failed += 1
+            elif user_on_active_squad(panel_user):
+                squad_already += 1
+            elif await reassign_to_active_squad(x3, panel_user):
+                squad_moved += 1
+            else:
+                squad_failed += 1
+
+            if not is_telegram_chat_id(tg_id):
+                skipped_non_tg += 1
+                await asyncio.sleep(0.05)
+                continue
+
+            try:
+                sub_url = await _trafic_stat_sub_url(billing_uid, panel_user)
+                await bot.send_message(
+                    chat_id=tg_id,
+                    text=_trafic_stat_push_text(recalc_gb),
+                    reply_markup=_trafic_stat_connect_kb(sub_url),
+                )
+                pushed += 1
+            except Exception as e:
+                push_failed += 1
+                logger.warning("trafic_stat: push uid=%s tg=%s: %s", billing_uid, tg_id, e)
+
+            await asyncio.sleep(0.05)
+    finally:
+        _TRAFFIC_STAT_RUNNING.discard(admin_id)
+
+    await bot.send_message(
+        admin_chat_id,
+        (
+            "✅ <b>Готово (/trafic_stat)</b>\n\n"
+            f"• В выборке: <b>{total}</b>\n"
+            f"• +limit_wl: <b>{limit_ok}</b>\n"
+            f"• Squad → белая нода: <b>{squad_moved}</b>\n"
+            f"• Уже на белой ноде: {squad_already}\n"
+            f"• Push отправлено: <b>{pushed}</b>\n"
+            f"• Ошибка limit_wl: {limit_failed}\n"
+            f"• Ошибка squad: {squad_failed}\n"
+            f"• Ошибка push: {push_failed}\n"
+            f"• Пропущено (не Telegram chat_id): {skipped_non_tg}"
+        ),
+    )
+    logger.info(
+        "Админ %s /trafic_stat apply: total=%s limit=%s squad=%s pushed=%s",
+        admin_id,
+        total,
+        limit_ok,
+        squad_moved,
+        pushed,
+    )
 
 
 @router.message(Command("export_panel"))
