@@ -980,6 +980,8 @@ def _build_trafic_stat_xlsx(
         current = _naive_dt(current_end)
         still_active = current is not None and current > now_msk
         high_traffic = float(trafic_wl or 0) > _TRAFFIC_STAT_TRAFFIC_GB
+        if not still_active or not high_traffic:
+            continue
         purchases = [
             _format_trafic_stat_purchase(_payment_msk_date(_utc_naive(tc)), item)
             for tc, item in sorted(pays_by_user.get(uid, []), key=lambda x: _utc_naive(x[0]))
@@ -1082,11 +1084,11 @@ def _build_trafic_stat_xlsx(
 
 @router.message(Command(commands=["trafic_stat", "traffic_stat"]))
 async def trafic_stat_excel(message: Message):
-    """Пользователи с PRO-подпиской на 13.08.2026 дольше 2 недель + покупки (Excel)."""
+    """Активные PRO без «Навсегда»: на 13.08 > 2 недель, trafic_wl > 7, без покупок трафика."""
     if message.from_user.id not in ADMIN_IDS:
         return
 
-    await message.answer("🔄 Собираю пользователей с подпиской на 13.08 дольше 2 недель и формирую Excel…")
+    await message.answer("🔄 Собираю выборку /trafic_stat и формирую Excel…")
     try:
         users, payments = await sql.get_trafic_stat_source()
         path, n_rows = await asyncio.to_thread(_build_trafic_stat_xlsx, users, payments)
@@ -1096,7 +1098,8 @@ async def trafic_stat_excel(message: Message):
             except OSError:
                 pass
             await message.answer(
-                "Нет пользователей с активной подпиской VPN PRO на 13.08.2026 дольше 2 недель."
+                "Нет пользователей: активная подписка сейчас, на 13.08 дольше 2 недель, "
+                "trafic_wl > 7 ГБ, без «Навсегда» и без оплат трафика."
             )
             return
         try:
@@ -1104,10 +1107,9 @@ async def trafic_stat_excel(message: Message):
             await message.answer_document(
                 document=FSInputFile(path, filename=fname),
                 caption=(
-                    f"Пользователей с подпиской VPN PRO на 13.08.2026 дольше 2 недель: {n_rows}. "
-                    "Без тарифа «Навсегда» и без оплат трафика. "
-                    "Дата окончания на 13.08 = текущая дата в БД минус дни подписки, купленные после 13.08. "
-                    "Зелёный: текущая дата окончания позже сейчас; trafic_wl больше 7 ГБ. "
+                    f"В выборке {n_rows}: активная подписка сейчас, на 13.08 дольше 2 недель, "
+                    "trafic_wl > 7 ГБ, без тарифа «Навсегда», без оплат трафика. "
+                    "Дата окончания на 13.08 = текущая дата в БД минус дни подписки после 13.08. "
                     "Покупки: успешные платежи (подписка), не подарки."
                 ),
             )
