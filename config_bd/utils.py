@@ -1611,6 +1611,10 @@ class AsyncSQL:
                 and_(
                     Users.is_delete == False,
                     Users.user_id.notin_(multi_paid),
+                    or_(
+                        Users.field_bool_3.is_(False),
+                        Users.field_bool_3.is_(None),
+                    ),
                 )
             )
         if category == "never_bought_forever":
