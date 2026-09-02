@@ -982,6 +982,7 @@ def _build_trafic_stat_xlsx(
         high_traffic = float(trafic_wl or 0) > _TRAFFIC_STAT_TRAFFIC_GB
         if not still_active or not high_traffic:
             continue
+        recalc_gb = round(remaining_days / 30.0 * 10.0, 2)
         purchases = [
             _format_trafic_stat_purchase(_payment_msk_date(_utc_naive(tc)), item)
             for tc, item in sorted(pays_by_user.get(uid, []), key=lambda x: _utc_naive(x[0]))
@@ -994,6 +995,7 @@ def _build_trafic_stat_xlsx(
             trafic_wl,
             "True" if high_traffic else None,
             limit_wl,
+            recalc_gb,
             purchases,
             still_active,
             high_traffic,
@@ -1013,6 +1015,7 @@ def _build_trafic_stat_xlsx(
         "trafic_wl",
         "trafic_wl > 7 ГБ",
         "limit_wl",
+        "Пересчитанный трафик, ГБ",
         "Покупки",
     ]
     header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -1033,7 +1036,7 @@ def _build_trafic_stat_xlsx(
     for row_num, row in enumerate(rows_out, 2):
         (
             tg_id, snap_s, current_s, active_val, trafic_wl, traffic_val,
-            limit_wl, purchases, still_active, high_traffic,
+            limit_wl, recalc_gb, purchases, still_active, high_traffic,
         ) = row
         values = [
             tg_id,
@@ -1043,13 +1046,14 @@ def _build_trafic_stat_xlsx(
             trafic_wl,
             traffic_val,
             limit_wl,
+            recalc_gb,
             "\n".join(purchases),
         ]
         n_purchases = len(purchases)
         for col_num, value in enumerate(values, 1):
             cell = ws.cell(row=row_num, column=col_num, value=value)
             cell.border = thin_border
-            if col_num == 8:
+            if col_num == 9:
                 cell.alignment = wrap_top
             else:
                 cell.alignment = center
@@ -1068,12 +1072,13 @@ def _build_trafic_stat_xlsx(
         5: 14,
         6: 18,
         7: 14,
-        8: 48,
+        8: 26,
+        9: 48,
     }
     for col, width in widths.items():
         ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = width
 
-    ws.auto_filter.ref = f"A1:H{max(1, len(rows_out) + 1)}"
+    ws.auto_filter.ref = f"A1:I{max(1, len(rows_out) + 1)}"
     ws.freeze_panes = "A2"
 
     fd, path = tempfile.mkstemp(suffix=".xlsx")
@@ -1110,6 +1115,7 @@ async def trafic_stat_excel(message: Message):
                     f"В выборке {n_rows}: активная подписка сейчас, на 13.08 дольше 2 недель, "
                     "trafic_wl > 7 ГБ, без тарифа «Навсегда», без оплат трафика. "
                     "Дата окончания на 13.08 = текущая дата в БД минус дни подписки после 13.08. "
+                    "Пересчитанный трафик: (дата окончания на 13.08 − 13.08) / 30 × 10 ГБ. "
                     "Покупки: успешные платежи (подписка), не подарки."
                 ),
             )
