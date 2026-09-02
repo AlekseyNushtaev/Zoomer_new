@@ -3,16 +3,21 @@ import os
 import tempfile
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
-from typing import List, Tuple
+from typing import Any, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import openpyxl
 from aiogram import Router
-from openpyxl.styles import Alignment, Border, Side
+from openpyxl.styles import Alignment, Border, Side, PatternFill
 
 from bot import sql, x3
 from config import ADMIN_IDS
 from config_bd.models import Users
+from config_bd.utils import (
+    _billing_duration_from_amount_fallback,
+    _parse_traffic_duration,
+    _payload_duration_to_panel_days,
+)
 from logging_config import logger
 from aiogram.types import Message, FSInputFile
 from aiogram.filters import Command
@@ -760,6 +765,328 @@ async def export_billing_excel(message: Message):
         logger.info(f"Администратор {message.from_user.id} выгрузил /billing")
     except Exception as e:
         logger.exception("Ошибка /billing")
+        await message.answer(f"❌ Ошибка при выгрузке: {e}")
+
+
+_TRAFFIC_STAT_SNAPSHOT = date(2026, 8, 13)
+_TRAFFIC_STAT_LONG = date(2026, 9, 13)
+_TRAFFIC_STAT_GREEN = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
+
+
+def _payload_map(payload: Optional[str]) -> dict[str, str]:
+    if not payload:
+        return {}
+    out: dict[str, str] = {}
+    for part in payload.split(","):
+        if ":" not in part:
+            continue
+        k, _, v = part.partition(":")
+        out[k.strip()] = v.strip()
+    return out
+
+
+def _trafic_stat_amount_rub(
+    amount: Any,
+    payload: Optional[str],
+    channel: str,
+    currency: Optional[str],
+) -> Optional[int]:
+    from handlers.handlers_statistic import convert_crypto_to_rub, convert_stars_to_rub
+
+    try:
+        raw = float(amount)
+    except (TypeError, ValueError):
+        raw = None
+
+    if channel == "stars":
+        if raw is None:
+            return None
+        mapped = convert_stars_to_rub(int(round(raw)))
+        return mapped if mapped is not None else int(round(raw))
+
+    if channel == "cryptobot" and currency and currency.upper() != "RUB":
+        if raw is not None:
+            key = f"{raw:.1f}"
+            mapped = convert_crypto_to_rub(currency.upper(), key)
+            if mapped is not None:
+                return mapped
+        try:
+            return int(round(float(_payload_map(payload).get("amount", ""))))
+        except (TypeError, ValueError):
+            return None
+
+    if raw is None:
+        return None
+    return int(round(raw))
+
+
+def _classify_trafic_stat_payment(
+    payload: Optional[str],
+    is_gift: bool,
+    amount: Any,
+    channel: str,
+    currency: Optional[str],
+) -> Optional[dict]:
+    if is_gift:
+        return None
+    amount_rub = _trafic_stat_amount_rub(amount, payload, channel, currency)
+    if amount_rub == 1:
+        return None
+
+    m = _payload_map(payload)
+    if m.get("gift", "False").lower() == "true":
+        return None
+
+    raw_duration = m.get("duration")
+    traffic_gb = _parse_traffic_duration(raw_duration)
+    if traffic_gb is not None:
+        return {
+            "kind": "traffic",
+            "days": None,
+            "gb": traffic_gb,
+            "amount_rub": amount_rub,
+            "white": False,
+        }
+
+    white = m.get("white", "False").lower() == "true"
+    days = _payload_duration_to_panel_days(raw_duration)
+    if days is None and amount_rub is not None:
+        days = _billing_duration_from_amount_fallback(amount_rub)
+    if days is None:
+        return None
+    return {
+        "kind": "subscription",
+        "days": days,
+        "gb": None,
+        "amount_rub": amount_rub,
+        "white": white,
+    }
+
+
+def _format_trafic_stat_purchase(pay_date: date, item: dict) -> str:
+    ds = pay_date.strftime("%d.%m.%y")
+    rub = item.get("amount_rub")
+    rub_s = "—" if rub is None else f"{rub} руб"
+    if item["kind"] == "traffic":
+        return f"{ds} - трафик {item['gb']} ГБ - {rub_s}"
+    return f"{ds} - подписка {item['days']} дней - {rub_s}"
+
+
+def _naive_dt(dt: Optional[datetime]) -> Optional[datetime]:
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
+
+
+def _simulate_end_on_snapshot(
+    sub_pays: List[Tuple[datetime, int]],
+    snapshot: date,
+) -> Optional[datetime]:
+    end: Optional[datetime] = None
+    ordered = sorted(
+        (
+            (tc, days)
+            for tc, days in sub_pays
+            if days and _payment_msk_date(_utc_naive(tc)) <= snapshot
+        ),
+        key=lambda x: _utc_naive(x[0]),
+    )
+    for tc, days in ordered:
+        pay_t = _utc_naive(tc)
+        start = end if end is not None and end > pay_t else pay_t
+        end = start + timedelta(days=days)
+    return end
+
+
+def _end_date_as_of_snapshot(
+    current_end: Optional[datetime],
+    sub_pays: List[Tuple[datetime, int]],
+    snapshot: date,
+) -> Optional[datetime]:
+    current = _naive_dt(current_end)
+    if current is None:
+        return _simulate_end_on_snapshot(sub_pays, snapshot)
+
+    later = sorted(
+        (
+            (tc, days)
+            for tc, days in sub_pays
+            if days and _payment_msk_date(_utc_naive(tc)) > snapshot
+        ),
+        key=lambda x: _utc_naive(x[0]),
+        reverse=True,
+    )
+    end = current
+    for tc, days in later:
+        pay_date = _payment_msk_date(_utc_naive(tc))
+        old = end - timedelta(days=days)
+        if old.date() <= pay_date:
+            return _simulate_end_on_snapshot(sub_pays, snapshot)
+        end = old
+    return end
+
+
+def _trafic_stat_tg_id(user_id: int, linked: Optional[int]) -> int:
+    if user_id > 0:
+        return user_id
+    if linked is not None and linked > 0:
+        return linked
+    return user_id
+
+
+def _build_trafic_stat_xlsx(
+    users: List[Tuple[int, Optional[int], Optional[datetime], float, float]],
+    payments: List[Tuple[int, datetime, Any, Optional[str], bool, str, Optional[str]]],
+) -> Tuple[str, int]:
+    snapshot = _TRAFFIC_STAT_SNAPSHOT
+    long_until = _TRAFFIC_STAT_LONG
+
+    pays_by_user: dict[int, list[tuple[datetime, dict]]] = defaultdict(list)
+    sub_days_by_user: dict[int, list[tuple[datetime, int]]] = defaultdict(list)
+
+    for uid, tc, amt, pl, ig, channel, currency in payments:
+        item = _classify_trafic_stat_payment(pl, ig, amt, channel, currency)
+        if item is None:
+            continue
+        pays_by_user[uid].append((tc, item))
+        if item["kind"] == "subscription" and not item["white"] and item["days"]:
+            sub_days_by_user[uid].append((tc, int(item["days"])))
+
+    rows_out: list[tuple] = []
+    for uid, linked, current_end, trafic_wl, limit_wl in users:
+        snap_end = _end_date_as_of_snapshot(current_end, sub_days_by_user.get(uid, []), snapshot)
+        if snap_end is None or snap_end.date() < snapshot:
+            continue
+
+        longer = snap_end.date() > long_until
+        purchases = [
+            _format_trafic_stat_purchase(_payment_msk_date(_utc_naive(tc)), item)
+            for tc, item in sorted(pays_by_user.get(uid, []), key=lambda x: _utc_naive(x[0]))
+        ]
+        rows_out.append((
+            _trafic_stat_tg_id(uid, linked),
+            snap_end.strftime("%d.%m.%y"),
+            "True" if longer else None,
+            current_end.strftime("%d.%m.%y") if current_end else "",
+            trafic_wl,
+            limit_wl,
+            purchases,
+            longer,
+        ))
+
+    rows_out.sort(key=lambda r: r[0])
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "trafic_stat"
+
+    headers = [
+        "tg_id",
+        "Дата окончания на 13.08",
+        "Дольше 13.09",
+        "Текущая дата окончания",
+        "trafic_wl",
+        "limit_wl",
+        "Покупки",
+    ]
+    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    thin_border = Border(
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
+    wrap_top = Alignment(wrap_text=True, vertical="top")
+    center = Alignment(horizontal="center", vertical="center")
+
+    for col_num, title in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_num, value=title)
+        cell.alignment = header_alignment
+        cell.border = thin_border
+
+    for row_num, row in enumerate(rows_out, 2):
+        tg_id, snap_s, longer_val, current_s, trafic_wl, limit_wl, purchases, longer = row
+        values = [
+            tg_id,
+            snap_s,
+            longer_val,
+            current_s,
+            trafic_wl,
+            limit_wl,
+            "\n".join(purchases),
+        ]
+        n_purchases = len(purchases)
+        for col_num, value in enumerate(values, 1):
+            cell = ws.cell(row=row_num, column=col_num, value=value)
+            cell.border = thin_border
+            if col_num == 7:
+                cell.alignment = wrap_top
+            else:
+                cell.alignment = center
+            if longer and col_num in (2, 3):
+                cell.fill = _TRAFFIC_STAT_GREEN
+        if n_purchases:
+            ws.row_dimensions[row_num].height = min(18 * n_purchases, 180)
+
+    widths = {
+        1: 16,
+        2: 24,
+        3: 16,
+        4: 24,
+        5: 14,
+        6: 14,
+        7: 48,
+    }
+    for col, width in widths.items():
+        ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = width
+
+    ws.auto_filter.ref = f"A1:G{max(1, len(rows_out) + 1)}"
+    ws.freeze_panes = "A2"
+
+    fd, path = tempfile.mkstemp(suffix=".xlsx")
+    os.close(fd)
+    wb.save(path)
+    return path, len(rows_out)
+
+
+@router.message(Command(commands=["trafic_stat", "traffic_stat"]))
+async def trafic_stat_excel(message: Message):
+    """Пользователи с активной PRO-подпиской на 13.08.2026 + покупки (Excel)."""
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    await message.answer("🔄 Собираю пользователей с подпиской на 13.08 и формирую Excel…")
+    try:
+        users, payments = await sql.get_trafic_stat_source()
+        path, n_rows = await asyncio.to_thread(_build_trafic_stat_xlsx, users, payments)
+        if n_rows == 0:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            await message.answer("Нет пользователей с активной подпиской VPN PRO на 13.08.2026.")
+            return
+        try:
+            fname = f"trafic_stat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            await message.answer_document(
+                document=FSInputFile(path, filename=fname),
+                caption=(
+                    f"Пользователей с активной подпиской VPN PRO на 13.08.2026: {n_rows}. "
+                    "Дата окончания на 13.08 восстановлена по текущей дате минус оплаты после 13.08. "
+                    "Если на 13.08 окончание было позже 13.09 — ячейка зелёная и столбец True. "
+                    "Покупки: успешные платежи (подписка и трафик), не подарки."
+                ),
+            )
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        logger.info(f"Администратор {message.from_user.id} выгрузил /trafic_stat ({n_rows})")
+    except Exception as e:
+        logger.exception("Ошибка /trafic_stat")
         await message.answer(f"❌ Ошибка при выгрузке: {e}")
 
 
