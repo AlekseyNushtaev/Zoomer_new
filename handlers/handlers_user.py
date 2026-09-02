@@ -7,7 +7,7 @@ from handlers.handlers_start_prize import schedule_start_prize
 from lead_tracker import post_user_registered, post_user_trial, tracker_source_from_ref_and_stamp
 from keyboard import (keyboard_start, keyboard_tariff_bonus, keyboard_tariff,
                       keyboard_sub_after_free, ref_keyboard, keyboard_gift_tariff,
-                      keyboard_payment_method, chanel_keyboard, create_kb,
+                      keyboard_payment_method, keyboard_payment_method_stock, chanel_keyboard, create_kb,
                       keyboard_inline_ref, keyboard_partner_intro, keyboard_partner_dashboard,
                       keyboard_partner_withdraw, keyboard_buy_menu, keyboard_earn_with_us,
                       OPEN_SITE_CB, SITE_URL,
@@ -412,7 +412,7 @@ async def process_payment_method_bonus(callback: CallbackQuery):
         callback,
         "buy_subscription",
         _R120_PAYMENT_TEXT,
-        keyboard_payment_method("r_120"),
+        keyboard_payment_method_stock("r_120"),
     )
 
 
