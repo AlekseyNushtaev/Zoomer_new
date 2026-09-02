@@ -21,6 +21,7 @@ from config_bd.utils import (
 from logging_config import logger
 from aiogram.types import Message, FSInputFile
 from aiogram.filters import Command
+from wl_traffic.service import is_forever_duration, is_forever_end_date
 
 router = Router()
 
@@ -769,7 +770,8 @@ async def export_billing_excel(message: Message):
 
 
 _TRAFFIC_STAT_SNAPSHOT = date(2026, 8, 13)
-_TRAFFIC_STAT_LONG = date(2026, 9, 13)
+_TRAFFIC_STAT_MIN_REMAINING_DAYS = 14
+_TRAFFIC_STAT_TRAFFIC_GB = 7
 _TRAFFIC_STAT_GREEN = PatternFill(start_color="92D050", end_color="92D050", fill_type="solid")
 
 
@@ -905,6 +907,7 @@ def _end_date_as_of_snapshot(
     sub_pays: List[Tuple[datetime, int]],
     snapshot: date,
 ) -> Optional[datetime]:
+    """Текущая дата окончания минус дни подписки, купленные после snapshot (МСК)."""
     current = _naive_dt(current_end)
     if current is None:
         return _simulate_end_on_snapshot(sub_pays, snapshot)
@@ -941,10 +944,11 @@ def _build_trafic_stat_xlsx(
     payments: List[Tuple[int, datetime, Any, Optional[str], bool, str, Optional[str]]],
 ) -> Tuple[str, int]:
     snapshot = _TRAFFIC_STAT_SNAPSHOT
-    long_until = _TRAFFIC_STAT_LONG
+    now_msk = datetime.now(MSK).replace(tzinfo=None)
 
     pays_by_user: dict[int, list[tuple[datetime, dict]]] = defaultdict(list)
     sub_days_by_user: dict[int, list[tuple[datetime, int]]] = defaultdict(list)
+    forever_paid: set[int] = set()
 
     for uid, tc, amt, pl, ig, channel, currency in payments:
         item = _classify_trafic_stat_payment(pl, ig, amt, channel, currency)
@@ -953,14 +957,25 @@ def _build_trafic_stat_xlsx(
         pays_by_user[uid].append((tc, item))
         if item["kind"] == "subscription" and not item["white"] and item["days"]:
             sub_days_by_user[uid].append((tc, int(item["days"])))
+            if is_forever_duration(int(item["days"])):
+                forever_paid.add(uid)
 
     rows_out: list[tuple] = []
     for uid, linked, current_end, trafic_wl, limit_wl in users:
+        if uid in forever_paid:
+            continue
         snap_end = _end_date_as_of_snapshot(current_end, sub_days_by_user.get(uid, []), snapshot)
         if snap_end is None or snap_end.date() < snapshot:
             continue
+        if is_forever_end_date(current_end) or is_forever_end_date(snap_end):
+            continue
+        remaining_days = (snap_end.date() - snapshot).days
+        if remaining_days <= _TRAFFIC_STAT_MIN_REMAINING_DAYS:
+            continue
 
-        longer = snap_end.date() > long_until
+        current = _naive_dt(current_end)
+        still_active = current is not None and current > now_msk
+        high_traffic = float(trafic_wl or 0) > _TRAFFIC_STAT_TRAFFIC_GB
         purchases = [
             _format_trafic_stat_purchase(_payment_msk_date(_utc_naive(tc)), item)
             for tc, item in sorted(pays_by_user.get(uid, []), key=lambda x: _utc_naive(x[0]))
@@ -968,12 +983,14 @@ def _build_trafic_stat_xlsx(
         rows_out.append((
             _trafic_stat_tg_id(uid, linked),
             snap_end.strftime("%d.%m.%y"),
-            "True" if longer else None,
-            current_end.strftime("%d.%m.%y") if current_end else "",
+            current.strftime("%d.%m.%y") if current else "",
+            "True" if still_active else None,
             trafic_wl,
+            "True" if high_traffic else None,
             limit_wl,
             purchases,
-            longer,
+            still_active,
+            high_traffic,
         ))
 
     rows_out.sort(key=lambda r: r[0])
@@ -985,9 +1002,10 @@ def _build_trafic_stat_xlsx(
     headers = [
         "tg_id",
         "Дата окончания на 13.08",
-        "Дольше 13.09",
         "Текущая дата окончания",
+        "Подписка активна",
         "trafic_wl",
+        "trafic_wl > 7 ГБ",
         "limit_wl",
         "Покупки",
     ]
@@ -1007,13 +1025,17 @@ def _build_trafic_stat_xlsx(
         cell.border = thin_border
 
     for row_num, row in enumerate(rows_out, 2):
-        tg_id, snap_s, longer_val, current_s, trafic_wl, limit_wl, purchases, longer = row
+        (
+            tg_id, snap_s, current_s, active_val, trafic_wl, traffic_val,
+            limit_wl, purchases, still_active, high_traffic,
+        ) = row
         values = [
             tg_id,
             snap_s,
-            longer_val,
             current_s,
+            active_val,
             trafic_wl,
+            traffic_val,
             limit_wl,
             "\n".join(purchases),
         ]
@@ -1021,11 +1043,13 @@ def _build_trafic_stat_xlsx(
         for col_num, value in enumerate(values, 1):
             cell = ws.cell(row=row_num, column=col_num, value=value)
             cell.border = thin_border
-            if col_num == 7:
+            if col_num == 8:
                 cell.alignment = wrap_top
             else:
                 cell.alignment = center
-            if longer and col_num in (2, 3):
+            if still_active and col_num in (3, 4):
+                cell.fill = _TRAFFIC_STAT_GREEN
+            if high_traffic and col_num in (5, 6):
                 cell.fill = _TRAFFIC_STAT_GREEN
         if n_purchases:
             ws.row_dimensions[row_num].height = min(18 * n_purchases, 180)
@@ -1033,16 +1057,17 @@ def _build_trafic_stat_xlsx(
     widths = {
         1: 16,
         2: 24,
-        3: 16,
-        4: 24,
+        3: 24,
+        4: 18,
         5: 14,
-        6: 14,
-        7: 48,
+        6: 18,
+        7: 14,
+        8: 48,
     }
     for col, width in widths.items():
         ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = width
 
-    ws.auto_filter.ref = f"A1:G{max(1, len(rows_out) + 1)}"
+    ws.auto_filter.ref = f"A1:H{max(1, len(rows_out) + 1)}"
     ws.freeze_panes = "A2"
 
     fd, path = tempfile.mkstemp(suffix=".xlsx")
@@ -1053,11 +1078,11 @@ def _build_trafic_stat_xlsx(
 
 @router.message(Command(commands=["trafic_stat", "traffic_stat"]))
 async def trafic_stat_excel(message: Message):
-    """Пользователи с активной PRO-подпиской на 13.08.2026 + покупки (Excel)."""
+    """Пользователи с PRO-подпиской на 13.08.2026 дольше 2 недель + покупки (Excel)."""
     if message.from_user.id not in ADMIN_IDS:
         return
 
-    await message.answer("🔄 Собираю пользователей с подпиской на 13.08 и формирую Excel…")
+    await message.answer("🔄 Собираю пользователей с подпиской на 13.08 дольше 2 недель и формирую Excel…")
     try:
         users, payments = await sql.get_trafic_stat_source()
         path, n_rows = await asyncio.to_thread(_build_trafic_stat_xlsx, users, payments)
@@ -1066,16 +1091,19 @@ async def trafic_stat_excel(message: Message):
                 os.remove(path)
             except OSError:
                 pass
-            await message.answer("Нет пользователей с активной подпиской VPN PRO на 13.08.2026.")
+            await message.answer(
+                "Нет пользователей с активной подпиской VPN PRO на 13.08.2026 дольше 2 недель."
+            )
             return
         try:
             fname = f"trafic_stat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
             await message.answer_document(
                 document=FSInputFile(path, filename=fname),
                 caption=(
-                    f"Пользователей с активной подпиской VPN PRO на 13.08.2026: {n_rows}. "
-                    "Дата окончания на 13.08 восстановлена по текущей дате минус оплаты после 13.08. "
-                    "Если на 13.08 окончание было позже 13.09 — ячейка зелёная и столбец True. "
+                    f"Пользователей с подпиской VPN PRO на 13.08.2026 дольше 2 недель: {n_rows}. "
+                    "Без тарифа «Навсегда». "
+                    "Дата окончания на 13.08 = текущая дата в БД минус дни подписки, купленные после 13.08. "
+                    "Зелёный: текущая дата окончания позже сейчас; trafic_wl больше 7 ГБ. "
                     "Покупки: успешные платежи (подписка и трафик), не подарки."
                 ),
             )

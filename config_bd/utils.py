@@ -2670,7 +2670,10 @@ class AsyncSQL:
         users: (user_id, linked_telegram_id, subscription_end_date, trafic_wl, limit_wl)
         payments: (user_id, time_created, amount, payload, is_gift, channel, currency)
         channel: rub | stars | cryptobot. Успешные платежи (confirmed/paid).
+        Без тарифа «Навсегда» (subscription_end_date < 2030-01-01).
         """
+        from wl_traffic.constants import FOREVER_END_CUTOFF
+
         users_rows: List[Tuple[int, Optional[int], Optional[datetime], float, float]] = []
         pay_rows: List[Tuple[int, datetime, Any, Optional[str], bool, str, Optional[str]]] = []
 
@@ -2684,6 +2687,7 @@ class AsyncSQL:
             ).where(
                 Users.is_delete == False,
                 Users.subscription_end_date.isnot(None),
+                Users.subscription_end_date < FOREVER_END_CUTOFF,
             )
             for uid, linked, end_dt, trafic, limit_wl in (await session.execute(uq)).all():
                 users_rows.append((
