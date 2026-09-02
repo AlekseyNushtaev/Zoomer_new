@@ -21,6 +21,7 @@ from services.partner_apply import (
     ensure_partner_draft_application,
     notify_admins_new_application,
     notify_partner_user,
+    revoke_partner_bot_token,
     submit_managed_partner_application,
     submit_partner_application,
 )
@@ -641,6 +642,48 @@ async def admin_partner_command(message: Message):
         await message.answer("❌ Нет доступа.")
         return
     await message.answer("🛠 <b>Админка партнёрских ботов</b>", reply_markup=_admin_menu_kb())
+
+
+@router.message(Command("partner_revoke"))
+async def partner_revoke_command(message: Message):
+    if not _is_partner_admin(message.from_user.id):
+        await message.answer("❌ Нет доступа.")
+        return
+
+    args = (message.text or "").split(maxsplit=2)
+    if len(args) < 3:
+        await message.answer(
+            "❌ Использование: /partner_revoke <id бота партнёра> <TOKEN>\n"
+            "Например: /partner_revoke 12 123456:AAH..."
+        )
+        return
+
+    try:
+        app_id = int(args[1].strip())
+    except ValueError:
+        await message.answer("❌ ID бота партнёра должен быть числом.")
+        return
+
+    token = args[2].strip()
+    app, err = await revoke_partner_bot_token(app_id, token)
+    if err:
+        await message.answer(f"❌ {err}")
+        return
+
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    logger.info(
+        "partner_revoke: admin_id={} app_id={} bot=@{}",
+        message.from_user.id,
+        app.id,
+        app.bot_username,
+    )
+    await message.answer(
+        f"✅ Токен бота #{app.id} (@{app.bot_username}) обновлён в БД."
+    )
 
 
 @router.message(Command("update_all_bots"))

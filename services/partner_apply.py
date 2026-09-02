@@ -145,6 +145,48 @@ async def submit_managed_partner_application(
     )
 
 
+async def revoke_partner_bot_token(
+    app_id: int,
+    token: str,
+) -> Tuple[Optional[object], Optional[str]]:
+    """Заменяет токен партнёрского бота в БД. Возвращает (application, error_message)."""
+    token = (token or "").strip()
+    if not TOKEN_PATTERN.match(token):
+        return None, "Неверный формат токена."
+
+    app = await partner_sql.get_by_id(app_id)
+    if not app:
+        return None, f"Бот #{app_id} не найден."
+
+    th = token_hash(token)
+    other = await partner_sql.get_by_token_hash(th)
+    if other and other.id != app_id:
+        return None, f"Этот токен уже привязан к боту #{other.id}."
+
+    me = await validate_bot_token(token)
+    if not me:
+        return None, "Токен недействителен."
+
+    bot_username = (me.get("username") or "").lstrip("@")
+    bot_display_name = me.get("first_name") or app.bot_display_name or ""
+
+    if bot_username:
+        existing_name = await partner_sql.get_by_bot_username(bot_username)
+        if existing_name and existing_name.id != app_id:
+            return None, f"Юзернейм @{bot_username} уже занят ботом #{existing_name.id}."
+
+    updated = await partner_sql.update_token(
+        app_id,
+        bot_token_encrypted=encrypt_token(token),
+        bot_token_hash=th,
+        bot_username=bot_username or None,
+        bot_display_name=bot_display_name or None,
+    )
+    if not updated:
+        return None, f"Бот #{app_id} не найден."
+    return updated, None
+
+
 async def notify_partner_user(
     partner_tg_id: int,
     text: str,

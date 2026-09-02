@@ -50,6 +50,14 @@ class PartnerAppSQL:
             stmt = select(PartnerBotApplications).where(PartnerBotApplications.bot_token_hash == token_hash)
             return (await session.execute(stmt)).scalar_one_or_none()
 
+    async def get_by_bot_username(self, bot_username: str) -> Optional[PartnerBotApplications]:
+        uname = (bot_username or "").lstrip("@")
+        if not uname:
+            return None
+        async with self.session_factory() as session:
+            stmt = select(PartnerBotApplications).where(PartnerBotApplications.bot_username == uname)
+            return (await session.execute(stmt)).scalar_one_or_none()
+
     async def list_by_partner(self, partner_tg_id: int) -> List[PartnerBotApplications]:
         async with self.session_factory() as session:
             stmt = (
@@ -163,6 +171,29 @@ class PartnerAppSQL:
             app.bot_username = bot_username.lstrip("@")
             app.bot_display_name = bot_display_name
             app.status = "pending"
+            await session.commit()
+            await session.refresh(app)
+            return app
+
+    async def update_token(
+        self,
+        app_id: int,
+        *,
+        bot_token_encrypted: str,
+        bot_token_hash: str,
+        bot_username: Optional[str] = None,
+        bot_display_name: Optional[str] = None,
+    ) -> Optional[PartnerBotApplications]:
+        async with self.session_factory() as session:
+            app = await session.get(PartnerBotApplications, app_id)
+            if not app:
+                return None
+            app.bot_token_encrypted = bot_token_encrypted
+            app.bot_token_hash = bot_token_hash
+            if bot_username is not None:
+                app.bot_username = bot_username.lstrip("@")
+            if bot_display_name is not None:
+                app.bot_display_name = bot_display_name
             await session.commit()
             await session.refresh(app)
             return app
