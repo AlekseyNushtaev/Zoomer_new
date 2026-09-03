@@ -563,8 +563,8 @@ async def import_pays_start(message: Message) -> None:
     await message.answer(
         "💳 Отправьте <b>.xlsx</b> с платежами (лист <code>payments_sbp</code> как в "
         "<code>/export</code>): колонки <code>User ID</code>, <code>Amount</code>.\n\n"
-        "Обычные суммы: 99→+7д, 149/249/299→+30д, 539/749→+90д, 999/1349→+180д, 2399→+365д, 3699→+730д; суммы <code>1</code> и "
-        "<code>399</code> обрабатываются отдельно (399 — white +30д).\n\n"
+        "Обычные суммы: 99→+7д, 149/249/299→+30д, 539/749→+90д, 999/1349→+180д, 2399→+365д, 3699→+730д; "
+        "сумма <code>1</code> пропускается. Сумма <code>399</code> (white) больше не применяется.\n\n"
         "📎 До <b>20 МБ</b>.\n\n"
         "Отмена: <code>/import_pays_cancel</code>",
         parse_mode="HTML",
@@ -740,11 +740,15 @@ async def import_pays_document(message: Message) -> None:
         log_lines: List[str] = []
         casual_ok = 0
         casual_unknown = 0
-        white_ok = 0
+        white_skipped = 0
         failed = 0
 
         for uid, amount in rows:
-            if amount == 1 or amount == 399:
+            if amount == 1:
+                continue
+            if amount == 399:
+                white_skipped += 1
+                log_lines.append(f"⏭ white отключён: user_id={uid} amount=399")
                 continue
             user = await sql.get_user_object_by_user_id(uid)
             if not user:
@@ -776,49 +780,21 @@ async def import_pays_document(message: Message) -> None:
                 logger.exception("import_pays casual user_id=%s", uid)
                 log_lines.append(f"❌ casual user_id={uid} amount={amount}: {e}")
 
-        for uid, amount in rows:
-            if amount != 399:
-                continue
-            user = await sql.get_user_object_by_user_id(uid)
-            if not user:
-                log_lines.append(f"⚠️ white: нет user_id={uid} amount=399")
-                failed += 1
-                continue
-            try:
-                we = user.white_subscription_end_date
-                if we:
-                    new_w = we + timedelta(days=30)
-                    note = "продление +30д"
-                else:
-                    new_w = now_naive + timedelta(days=30)
-                    await sql.update_white_subscription(uid, x3.generate_client_id(uid * 100))
-                    note = "с нуля + white_subscription"
-                await sql.update_white_subscription_end_date(uid, new_w)
-                white_ok += 1
-                log_lines.append(
-                    f"✅ white user_id={uid} amount=399 → "
-                    f"{new_w.strftime('%Y-%m-%d %H:%M')} ({note})"
-                )
-            except Exception as e:
-                failed += 1
-                logger.exception("import_pays white user_id=%s", uid)
-                log_lines.append(f"❌ white user_id={uid}: {e}")
-
         await _flush_import_pays_log(message, log_lines)
         await message.answer(
             "📊 <b>Итог import_pays</b>\n"
             f"Обычные тарифы применено: {casual_ok}\n"
-            f"White 399 применено: {white_ok}\n"
+            f"White 399 пропущено: {white_skipped}\n"
             f"Строк без User ID/Amount: {skipped_parse}\n"
             f"Неизвестная сумма (casual): {casual_unknown}\n"
             f"Ошибок / нет пользователя: {failed}",
             parse_mode="HTML",
         )
         logger.info(
-            "Админ %s import_pays: casual_ok=%s white_ok=%s skipped=%s unknown=%s failed=%s",
+            "Админ %s import_pays: casual_ok=%s white_skipped=%s skipped=%s unknown=%s failed=%s",
             message.from_user.id,
             casual_ok,
-            white_ok,
+            white_skipped,
             skipped_parse,
             casual_unknown,
             failed,

@@ -55,7 +55,7 @@ router: Router = Router()
 # индексы в кортеже get_user (_user_tuple)
 _USER_TUPLE_RESERVE_FIELD = 8
 _USER_TUPLE_SUBSCRIPTION_END_DATE = 9
-_USER_TUPLE_FIELD_BOOL_3 = 26
+_USER_TUPLE_FIELD_BOOL_3 = 21
 
 
 async def _show_main_menu(

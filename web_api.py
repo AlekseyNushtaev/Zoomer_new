@@ -354,21 +354,8 @@ async def _user_row_from_jwt(ctx: dict[str, Any]):
 
 
 def _payload_tg_id_from_user_row(row) -> int:
-    """
-    user_id для payload оплаты: Telegram id при привязке, иначе отрицательный billing id сайта.
-    """
-    tg_col = int(row[1])
-    if tg_col > 0:
-        return tg_col
-    linked = row[28] if len(row) > 28 else None
-    if linked is not None:
-        try:
-            tid = int(linked)
-            if tid > 0:
-                return tid
-        except (TypeError, ValueError):
-            pass
-    return tg_col
+    """user_id для payload оплаты: Telegram id, иначе отрицательный billing id сайта."""
+    return int(row[1])
 
 
 async def resolve_telegram_user_id(ctx: dict[str, Any]) -> int:
@@ -376,18 +363,12 @@ async def resolve_telegram_user_id(ctx: dict[str, Any]) -> int:
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
     tg_col = row[1]
-    linked = row[28]
-    tg: Optional[int] = None
     if tg_col is not None and int(tg_col) > 0:
-        tg = int(tg_col)
-    elif linked is not None:
-        tg = int(linked)
-    if tg is None:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "Привяжите Telegram-аккаунт для этой операции",
-        )
-    return tg
+        return int(tg_col)
+    raise HTTPException(
+        status.HTTP_400_BAD_REQUEST,
+        "Привяжите Telegram-аккаунт для этой операции",
+    )
 
 
 async def _panel_vpn_usernames(ctx: dict[str, Any]) -> tuple[str, str]:
@@ -399,12 +380,9 @@ async def _panel_vpn_usernames(ctx: dict[str, Any]) -> tuple[str, str]:
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
     tg_col = row[1]
-    linked = row[28]
     tg: Optional[int] = None
     if tg_col is not None and int(tg_col) > 0:
         tg = int(tg_col)
-    elif linked is not None and int(linked) > 0:
-        tg = int(linked)
     if tg is not None:
         s = str(tg)
         return s, f"{s}_white"
@@ -537,7 +515,7 @@ async def _resolve_sub_page_payer(user_id: int) -> tuple[str, int]:
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
     payload_uid = _payload_tg_id_from_user_row(row)
-    if payload_uid <= 0 and not row[18]:
+    if payload_uid <= 0 and not row[15]:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "У пользователя сайта нет email — оплата недоступна",
@@ -659,8 +637,6 @@ async def _deliver_reset_code(email: str, code: str, row: tuple) -> None:
     tg: Optional[int] = None
     if row[1] is not None and int(row[1]) > 0:
         tg = int(row[1])
-    elif row[28] is not None:
-        tg = int(row[28])
     smtp_ok = False
     if SMTP_HOST and SMTP_FROM:
         try:
@@ -852,15 +828,12 @@ async def user_account(ctx: JwtCtx):
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
     tg_col = row[1]
-    linked = row[28]
-    email = row[18]
+    email = row[15]
     auth_type = ctx.get("auth", "telegram")
 
     tg_id: Optional[int] = None
     if tg_col is not None and int(tg_col) > 0:
         tg_id = int(tg_col)
-    elif linked is not None and int(linked) > 0:
-        tg_id = int(linked)
 
     has_telegram = tg_id is not None
     has_email = email is not None and str(email).strip() != ""
@@ -913,7 +886,7 @@ async def trial_activate(ctx: JwtCtx):
         row = await _user_row_from_jwt(ctx)
         if row is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
-        email = row[18] or ctx.get("username")
+        email = row[15] or ctx.get("username")
         if not email:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Нет email в профиле")
         em = _norm_email(str(email))
@@ -995,7 +968,7 @@ async def payments_create(ctx: JwtCtx, body: CreatePaymentIn):
     billing_user_id = int(row[1])
     payload_uid = _payload_tg_id_from_user_row(row)
     if payload_uid <= 0:
-        em = row[18] or ctx.get("username")
+        em = row[15] or ctx.get("username")
         if not em:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Нет email в профиле")
     payload_user = str(payload_uid)
@@ -1469,7 +1442,7 @@ async def auth_verify_email(body: VerifyEmailIn, request: Request):
     row = await sql.get_user_by_email(str(body.email))
     if row is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Пользователь не найден")
-    activation = row[20]
+    activation = row[16]
     if not activation or ":" not in str(activation):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Код не был отправлен")
     stored_code, expires_ts = str(activation).rsplit(":", 1)
@@ -1483,7 +1456,7 @@ async def auth_verify_email(body: VerifyEmailIn, request: Request):
     internal_id = int(row[0])
     await sql.set_email_verified(internal_id, True)
     await sql.set_activation_pass_by_email(str(body.email), None)
-    em = row[18] or str(body.email).strip().lower()
+    em = row[15] or str(body.email).strip().lower()
     token = _issue_jwt(user_id=internal_id, auth="email", username=em)
     return _auth_response(request, token, {"id": internal_id, "email": em}, success=True)
 
@@ -1495,7 +1468,7 @@ async def auth_resend_code(body: ResendCodeIn, request: Request):
     row = await sql.get_user_by_email(str(body.email))
     if row is None:
         return {"success": True}
-    if bool(row[24]):
+    if bool(row[19]):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Email уже подтверждён")
     await _send_verification_code(str(body.email))
     return {"success": True}
@@ -1534,7 +1507,7 @@ async def auth_google(body: GoogleAuthIn, request: Request):
     else:
         internal_id = int(row[0])
         # Ensure email_verified is set
-        if not bool(row[24]):
+        if not bool(row[19]):
             await sql.set_email_verified(internal_id, True)
 
     token = _issue_jwt(user_id=internal_id, auth="email", username=em)
@@ -1555,9 +1528,9 @@ async def auth_login(body: LoginIn, request: Request):
     client_ip = request.headers.get("x-real-ip", request.client.host)
     _rate_limit_or_raise(client_ip, "login", max_req=10, window=300)
     row = await sql.get_user_by_email(str(body.email))
-    if row is None or not _verify_password(body.password, row[27]):
+    if row is None or not _verify_password(body.password, row[22]):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Неверный email или пароль")
-    email_verified = bool(row[24])
+    email_verified = bool(row[19])
     if not email_verified:
         await _send_verification_code(str(body.email))
         return JSONResponse(
@@ -1565,7 +1538,7 @@ async def auth_login(body: LoginIn, request: Request):
             content={"detail": "Email не подтверждён", "requires_verification": True, "email": str(body.email).strip().lower()},
         )
     internal_id = int(row[0])
-    em = row[18] or str(body.email).strip().lower()
+    em = row[15] or str(body.email).strip().lower()
     token = _issue_jwt(user_id=internal_id, auth="email", username=em)
     return _auth_response(request, token, {"id": internal_id, "email": em})
 
@@ -1686,9 +1659,9 @@ async def user_change_password(ctx: JwtCtx, body: ChangePasswordIn):
     row = await _user_row_from_jwt(ctx)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
-    if not row[27]:
+    if not row[22]:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Пароль не установлен")
-    if not _verify_password(body.current_password, row[27]):
+    if not _verify_password(body.current_password, row[22]):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Неверный текущий пароль")
     await sql.set_password_hash_by_internal_id(int(row[0]), _hash_password(body.new_password))
     return {"success": True}

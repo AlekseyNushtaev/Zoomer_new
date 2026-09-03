@@ -45,20 +45,15 @@ _EXCEL_COL_WIDTH_MAX = 255
 
 _USERS_EXPORT_PARTNER_EXCLUDED = frozenset({
     "email",
-    "password",
     "password_hash",
-    "linked_telegram_id",
     "activation_pass",
     "field_str_1",
     "field_str_2",
-    "field_str_3",
     "field_bool_1",
     "field_bool_2",
     "field_bool_3",
     "ttclid",
     "subscribtion",
-    "white_subscription",
-    "last_broadcast_status",
     "last_broadcast_date",
     "in_chanel",
 })
@@ -74,9 +69,7 @@ _USERS_EXPORT_COLUMNS_DEFAULT = (
     "create_user",
     "reserve_field",
     "subscription_end_date",
-    "white_subscription_end_date",
     "last_notification_date",
-    "last_broadcast_status",
     "last_broadcast_date",
     "stamp",
     "ttclid",
@@ -513,11 +506,6 @@ async def _export_database_to_excel_impl(
         payments_wata_sbp_count = len(payments_wata_sbp_list)
         payments_wata_card_count = len(payments_wata_card_list)
         payments_fk_sbp_count = len(payments_fk_sbp_list)
-        white_subscription_count = (
-            sum(1 for u in users_list if u.white_subscription_end_date is not None)
-            if include_users
-            else None
-        )
 
         successful_payments_count = sum(1 for p in payments_list if p.status == "confirmed")
         successful_cards_count = sum(1 for p in payments_cards_list if p.status == "confirmed")
@@ -541,9 +529,6 @@ async def _export_database_to_excel_impl(
             else:
                 users_sheet_note = ""
             users_stats_line = f"├ 👥 Пользователей: {users_count}\n" if include_users else ""
-            white_sub_line = (
-                f"├ ⚪ White-подписок: {white_subscription_count}\n" if include_users else ""
-            )
             caption = (
                 "📊 Экспорт базы данных\n"
                 f"{users_sheet_note}"
@@ -559,7 +544,6 @@ async def _export_database_to_excel_impl(
                 f"├ 💳 Платежей WATA Карта: {successful_wata_card_count}/{payments_wata_card_count}\n"
                 f"├ 💳 Платежей FreeKassa (СБП/карта QR): {successful_fk_sbp_count}/{payments_fk_sbp_count}\n"
                 f"├ 💎 Платежей Криптоботом: {successful_cryptobot_count}/{payments_cryptobot_count}\n"
-                f"{white_sub_line}"
                 f"└ 👁 White-кликов: {white_counter_count}"
             )
             await message.answer_document(
@@ -968,16 +952,8 @@ def _end_date_as_of_snapshot(
     return end
 
 
-def _trafic_stat_tg_id(user_id: int, linked: Optional[int]) -> int:
-    if user_id > 0:
-        return user_id
-    if linked is not None and linked > 0:
-        return linked
-    return user_id
-
-
 def _build_trafic_stat_xlsx(
-    users: List[Tuple[int, Optional[int], Optional[datetime], float, float]],
+    users: List[Tuple[int, Optional[datetime], float, float]],
     payments: List[Tuple[int, datetime, Any, Optional[str], bool, str, Optional[str]]],
 ) -> Tuple[str, int, list[tuple[int, int, float]]]:
     snapshot = _TRAFFIC_STAT_SNAPSHOT
@@ -1003,7 +979,7 @@ def _build_trafic_stat_xlsx(
 
     rows_out: list[tuple] = []
     apply_rows: list[tuple[int, int, float]] = []
-    for uid, linked, current_end, trafic_wl, limit_wl in users:
+    for uid, current_end, trafic_wl, limit_wl in users:
         if uid in forever_paid or uid in traffic_paid:
             continue
         snap_end = _end_date_as_of_snapshot(current_end, sub_days_by_user.get(uid, []), snapshot)
@@ -1021,7 +997,7 @@ def _build_trafic_stat_xlsx(
         if not still_active or not high_traffic:
             continue
         recalc_gb = round(remaining_days / 30.0 * 10.0, 2)
-        tg_id = _trafic_stat_tg_id(uid, linked)
+        tg_id = uid
         purchases = [
             _format_trafic_stat_purchase(_payment_msk_date(_utc_naive(tc)), item)
             for tc, item in sorted(pays_by_user.get(uid, []), key=lambda x: _utc_naive(x[0]))

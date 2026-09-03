@@ -40,7 +40,7 @@ from wl_traffic.service import (
 )
 
 _ADD_TRAFFIC_ALL_PROGRESS_EVERY = 100
-_USER_TUPLE_FIELD_BOOL_2 = 25
+_USER_TUPLE_FIELD_BOOL_2 = 20
 
 _ADD_7_MAY_GIFT_HTML = (
     "🎁 <b>Сюрприз от Zoomer VPN</b>\n\n"
@@ -108,12 +108,9 @@ _SUB_TIER_LABELS = {
 def _panel_usernames_from_row(row: tuple) -> tuple[str, str]:
     """Пара username в панели: обычная, вайт (как в web_api._panel_vpn_usernames)."""
     tg_col = row[1]
-    linked = row[28]
     tg = None
     if tg_col is not None and int(tg_col) > 0:
         tg = int(tg_col)
-    elif linked is not None and int(linked) > 0:
-        tg = int(linked)
     if tg is not None:
         s = str(tg)
         return s, f"{s}_white"
@@ -300,7 +297,6 @@ async def pay_info_command(message: Message):
 
     reg_un, white_un = _panel_usernames_from_row(user_row)
     sub_db = user_row[9]
-    white_db = user_row[10]
 
     try:
         ar_reg, ar_white = await asyncio.gather(
@@ -326,7 +322,6 @@ async def pay_info_command(message: Message):
         f"<b>/pay {target_id}</b>\n\n"
         f"Подписка обычная в БД бота — {_pay_dt_str(sub_db)}\n"
         f"Подписка обычная в панели — {_pay_panel_sub_line(ar_reg)}\n"
-        f"Подписка вайт в БД бота — {_pay_dt_str(white_db)}\n"
         f"Подписка вайт в панели — {_pay_panel_sub_line(ar_white)}\n\n"
         f"📡 <b>Антиглушилка (WL-трафик)</b>\n"
         f"├ Лимит: <b>{limit_wl:.2f} GB</b>\n"
@@ -443,7 +438,7 @@ async def partner_remove_command(message: Message):
 
 @router.message(Command(commands=['sub']))
 async def set_subscription_date(message: Message):
-    """Установка subscription_end_date или white_subscription_end_date в БД и панели"""
+    """Установка subscription_end_date в БД и даты в панели (white — только панель)."""
     if message.from_user.id not in ADMIN_IDS:
         await message.answer("❌ Эта команда доступна только администраторам.")
         return
@@ -508,9 +503,10 @@ async def set_subscription_date(message: Message):
             return
 
         if is_white:
-            await sql.update_white_subscription_end_date(user_id, actual_date)
+            db_note = "💾 Дата white в БД больше не хранится (обновлена только панель)."
         else:
             await sql.update_subscription_end_date(user_id, actual_date)
+            db_note = "💾 База данных обновлена."
 
         tier = "white" if is_white else "main"
         notify_status = ""
@@ -542,7 +538,7 @@ async def set_subscription_date(message: Message):
             f"📅 Целевая дата (UTC): {target_date.strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"📅 Установленная в панели дата (UTC): {actual_date.strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"📝 Тариф: {_SUB_TIER_LABELS.get(tier, tier)}\n"
-            f"💾 База данных обновлена."
+            f"{db_note}"
             f"{notify_status}"
         )
 
@@ -689,7 +685,6 @@ def _build_delete_stamps_xlsx(rows: list[dict]) -> str:
         "partner",
         "create_user",
         "subscription_end_date",
-        "white_subscription_end_date",
         "in_panel",
         "is_connect",
         "is_delete",
@@ -711,7 +706,6 @@ def _build_delete_stamps_xlsx(rows: list[dict]) -> str:
             row.get("partner") or "",
             _excel_dt(row.get("create_user")),
             _excel_dt(row.get("subscription_end_date")),
-            _excel_dt(row.get("white_subscription_end_date")),
             row.get("in_panel"),
             row.get("is_connect"),
             row.get("is_delete"),
@@ -1337,7 +1331,7 @@ async def new_panel_users_command(message: Message):
 
 @router.message(Command(commands=['shortuuid_export']))
 async def shortuuid_export_command(message: Message):
-    """Синхронизация shortUuid из панели в поля subscribtion / white_subscription в БД."""
+    """Синхронизация shortUuid из панели в поле subscribtion в БД."""
     if message.from_user.id not in ADMIN_IDS:
         return
 
@@ -1373,17 +1367,14 @@ async def shortuuid_export_command(message: Message):
                 continue
 
             username = (panel_user.get("username") or "").strip()
-            is_white = username.endswith("_white")
+            if username.endswith("_white"):
+                updated_white += 1
+                continue
 
             try:
-                if is_white:
-                    await sql.update_white_subscription(tg_id, short_uuid)
-                    updated_white += 1
-                    logger.info(f"white_subscription обновлен для tg_id={tg_id}: {short_uuid}")
-                else:
-                    await sql.update_subscribtion(tg_id, short_uuid)
-                    logger.info(f"subscribtion обновлен для tg_id={tg_id}: {short_uuid}")
-                    updated_sub += 1
+                await sql.update_subscribtion(tg_id, short_uuid)
+                logger.info(f"subscribtion обновлен для tg_id={tg_id}: {short_uuid}")
+                updated_sub += 1
             except Exception as e:
                 errors += 1
                 logger.error(f"/shortuuid_export: ошибка для tg_id={tg_id}: {e}")
@@ -1392,7 +1383,7 @@ async def shortuuid_export_command(message: Message):
             f"✅ Готово.\n"
             f"👥 Записей в панели (после фильтра): {len(panel_users)}\n"
             f"📝 subscribtion обновлено: {updated_sub}\n"
-            f"📝 white_subscription обновлено: {updated_white}\n"
+            f"⏭ White в панели (поле в БД удалено): {updated_white}\n"
             f"⏭ Без telegramId: {skipped_no_telegram}\n"
             f"⏭ Нет в БД: {not_in_db}\n"
             f"⏭ Нет shortUuid в панели: {skipped_no_short}\n"
@@ -1826,20 +1817,12 @@ async def reset_field_bool_3_all_command(message: Message):
 
 @router.message(Command(commands=['add_2d']))
 async def add_2d_command(message: Message):
-    """Всем с непустыми датами: +2 дня к subscription_end_date и white_subscription_end_date."""
+    """Всем с непустыми датами: +2 дня к subscription_end_date."""
     if not message.from_user or message.from_user.id not in ADMIN_IDS:
         return
-    n_sub, n_white = await sql.bulk_add_2_days_to_subscription_dates()
-    await message.answer(
-        f"Готово: +2 дня к subscription_end_date — {n_sub} строк; "
-        f"+2 дня к white_subscription_end_date — {n_white} строк."
-    )
-    logger.info(
-        "Админ %s: /add_2d subscription_end_date=%s white_subscription_end_date=%s",
-        message.from_user.id,
-        n_sub,
-        n_white,
-    )
+    n_sub = await sql.bulk_add_2_days_to_subscription_dates()
+    await message.answer(f"Готово: +2 дня к subscription_end_date — {n_sub} строк.")
+    logger.info("Админ %s: /add_2d subscription_end_date=%s", message.from_user.id, n_sub)
 
 
 @router.message(Command(commands=['send_push']))

@@ -144,8 +144,8 @@ def tracker_source_from_ref_and_stamp(
 
 def _source_from_row(row: tuple) -> Optional[str]:
     ref = row[2] if len(row) > 2 else None
-    stamp = row[14] if len(row) > 14 else None
-    partner = row[29] if len(row) > 29 else None
+    stamp = row[12] if len(row) > 12 else None
+    partner = row[23] if len(row) > 23 else None
     return tracker_source_from_ref_and_stamp(ref, stamp, partner)
 
 

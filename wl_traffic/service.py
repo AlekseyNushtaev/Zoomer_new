@@ -136,9 +136,9 @@ async def resolve_panel_username(sql, billing_uid: int, white: bool = False) -> 
         return panel_username_for_billing_uid(billing_uid, white)
     if sql is not None:
         user = await sql.get_user(billing_uid)
-        if user is not None and len(user) > 22:
-            stamp = user[14]
-            field_str_2 = user[22]
+        if user is not None and len(user) > 18:
+            stamp = user[12]
+            field_str_2 = user[18]
             if stamp == "gift" and field_str_2:
                 base = str(field_str_2)
                 return f"{base}_white" if white else base

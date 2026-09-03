@@ -45,9 +45,9 @@ async def _credit_partner_commission(payer_uid: int, method: str, amount: int | 
     """Начисляет PARTNER_PROCENT% партнёру, если плательщик пришёл по partner-ссылке."""
     try:
         user_row = await sql.get_user(payer_uid)
-        if not user_row or len(user_row) <= 29:
+        if not user_row or len(user_row) <= 23:
             return
-        partner_str = user_row[29]
+        partner_str = user_row[23]
         if not partner_str:
             return
         partner_id = int(partner_str)
@@ -103,16 +103,11 @@ async def _resolve_buyer_for_payment(
             logger.error("Платёж: пользователь с email {} не найден в БД", em)
             return None
         db_uid = int(row[1])
-        linked = row[28]
-        email_norm = _norm_email(row[18] or em)
+        email_norm = _norm_email(row[15] or em)
 
         if db_uid > 0:
             panel_base = str(db_uid)
             notify_tg = db_uid
-        elif linked is not None and int(linked) > 0:
-            tid = int(linked)
-            panel_base = str(tid)
-            notify_tg = tid
         else:
             panel_base = None
             notify_tg = None
@@ -135,16 +130,8 @@ async def _resolve_buyer_for_payment(
     if row is None:
         logger.error("Платёж: пользователь сайта {} не найден в БД", db_uid)
         return None
-    linked = row[28] if len(row) > 28 else None
-    email_norm = _norm_email(str(row[18])) if row[18] else None
+    email_norm = _norm_email(str(row[15])) if row[15] else None
     notify_tg: Optional[int] = None
-    if linked is not None:
-        try:
-            tid = int(linked)
-            if tid > 0:
-                notify_tg = tid
-        except (TypeError, ValueError):
-            pass
     user_id_str = panel_username_for_site_user(db_uid, white_flag)
     if not email_norm:
         logger.error("Платёж сайта: нет email у user_id={}", db_uid)
@@ -399,7 +386,7 @@ async def process_confirmed_payment(
                         subscription_time, "%d-%m-%Y %H:%M МСК"
                     )
                     if white_flag:
-                        await sql.update_white_subscription_end_date(db_uid, subscription_end_date)
+                        logger.error("White tariff отключён, дата подписки в БД не обновлена")
                     else:
                         await sql.update_subscription_end_date(db_uid, subscription_end_date)
                     logger.info("✅ Дата подписки обновлена: {}", subscription_end_date)

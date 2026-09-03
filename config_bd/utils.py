@@ -168,6 +168,16 @@ def _naive_utc(dt: datetime) -> datetime:
 
 
 def _user_tuple(user: Users) -> Tuple:
+    """
+    Кортеж get_user / get_user_by_email / get_user_by_internal_id.
+    0 id, 1 user_id, 2 ref, 3 is_delete, 4 in_panel, 5 is_connect,
+    6 create_user, 7 in_chanel, 8 reserve_field, 9 subscription_end_date,
+    10 last_notification_date, 11 last_broadcast_date, 12 stamp, 13 ttclid,
+    14 subscribtion, 15 email, 16 activation_pass, 17 field_str_1, 18 field_str_2,
+    19 field_bool_1, 20 field_bool_2, 21 field_bool_3, 22 password_hash,
+    23 partner, 24 partner_balance, 25 partner_pay, 26 partner_flag,
+    27 trafic_wl, 28 limit_wl.
+    """
     return (
         user.id,
         user.user_id,
@@ -179,25 +189,19 @@ def _user_tuple(user: Users) -> Tuple:
         user.in_chanel,
         user.reserve_field,
         user.subscription_end_date,
-        user.white_subscription_end_date,
         user.last_notification_date,
-        user.last_broadcast_status,
         user.last_broadcast_date,
         user.stamp,
         user.ttclid,
         user.subscribtion,
-        user.white_subscription,
         user.email,
-        user.password,
         user.activation_pass,
         user.field_str_1,
         user.field_str_2,
-        user.field_str_3,
         user.field_bool_1,
         user.field_bool_2,
         user.field_bool_3,
         user.password_hash,
-        user.linked_telegram_id,
         user.partner,
         user.partner_balance,
         user.partner_pay,
@@ -541,8 +545,8 @@ class AsyncSQL:
             e.password_hash = None
             await session.flush()
 
-            t_paid_pro, t_paid_white = await _merge_user_paid_subscription_flags(session, t.user_id)
-            e_paid_pro, e_paid_white = await _merge_user_paid_subscription_flags(session, e.user_id)
+            t_paid_pro, _t_paid_white = await _merge_user_paid_subscription_flags(session, t.user_id)
+            e_paid_pro, _e_paid_white = await _merge_user_paid_subscription_flags(session, e.user_id)
 
             if t_paid_pro and e_paid_pro:
                 t.subscription_end_date = _sum_subscription_end_dates(
@@ -551,15 +555,6 @@ class AsyncSQL:
             else:
                 t.subscription_end_date = _max_subscription_end_dates(
                     t.subscription_end_date, e.subscription_end_date, merge_now
-                )
-
-            if t_paid_white and e_paid_white:
-                t.white_subscription_end_date = _sum_subscription_end_dates(
-                    t.white_subscription_end_date, e.white_subscription_end_date, merge_now
-                )
-            else:
-                t.white_subscription_end_date = _max_subscription_end_dates(
-                    t.white_subscription_end_date, e.white_subscription_end_date, merge_now
                 )
             t.in_panel = bool(t.in_panel or e.in_panel)
             t.in_chanel = bool(t.in_chanel or e.in_chanel)
@@ -579,8 +574,6 @@ class AsyncSQL:
                 t.ttclid = e.ttclid
             if not (t.subscribtion or "") and (e.subscribtion or ""):
                 t.subscribtion = e.subscribtion
-            if not (t.white_subscription or "") and (e.white_subscription or ""):
-                t.white_subscription = e.white_subscription
             t.field_bool_1 = bool(t.field_bool_1 or e.field_bool_1)
             t.field_bool_2 = bool(t.field_bool_2 or e.field_bool_2)
             t.field_bool_3 = bool(t.field_bool_3 or e.field_bool_3)
@@ -645,12 +638,9 @@ class AsyncSQL:
                     return dt.astimezone(timezone.utc)
 
                 sub_end = row[9]
-                w_end = row[10]
                 tid = int(row[1])
                 if sub_end:
                     await x3.set_expiration_date(str(tid), _aware_utc(sub_end), tid)
-                if w_end:
-                    await x3.set_expiration_date(str(tid) + "_white", _aware_utc(w_end), tid)
         except Exception as ex:
             logger.warning("post-merge panel cleanup/sync: {}", ex)
 
@@ -733,20 +723,14 @@ class AsyncSQL:
                         is_delete=False,
                         in_chanel=False,
                         reserve_field=False,
-                        white_subscription_end_date=None,
-                        white_subscription=None,
                         last_notification_date=None,
-                        last_broadcast_status=None,
                         last_broadcast_date=None,
                         ttclid=None,
                         email=None,
-                        password=None,
                         password_hash=None,
-                        linked_telegram_id=None,
                         activation_pass=None,
                         field_str_1=None,
                         field_str_2=None,
-                        field_str_3=None,
                         field_bool_1=False,
                         field_bool_2=False,
                         field_bool_3=False,
@@ -805,8 +789,8 @@ class AsyncSQL:
                 return (user.id, user.user_id, user.ref, user.is_delete,
                         user.in_panel, user.is_connect, user.create_user,
                         user.in_chanel, user.reserve_field, user.subscription_end_date,
-                        user.white_subscription_end_date, user.last_notification_date,
-                        user.last_broadcast_status, user.last_broadcast_date,
+                        user.last_notification_date,
+                        user.last_broadcast_date,
                         user.stamp, user.ttclid)
             return None
 
@@ -899,23 +883,9 @@ class AsyncSQL:
             await session.execute(stmt)
             await session.commit()
 
-    async def update_white_subscription_end_date(self, user_id: int, end_date: datetime):
-        async with self.session_factory() as session:
-            stmt = update(Users).where(Users.user_id == user_id).values(
-                white_subscription_end_date=_naive_utc(end_date)
-            )
-            await session.execute(stmt)
-            await session.commit()
-
     async def update_subscribtion(self, user_id: int, subscribtion: Optional[str]):
         async with self.session_factory() as session:
             stmt = update(Users).where(Users.user_id == user_id).values(subscribtion=subscribtion)
-            await session.execute(stmt)
-            await session.commit()
-
-    async def update_white_subscription(self, user_id: int, white_subscription: Optional[str]):
-        async with self.session_factory() as session:
-            stmt = update(Users).where(Users.user_id == user_id).values(white_subscription=white_subscription)
             await session.execute(stmt)
             await session.commit()
 
@@ -1148,11 +1118,8 @@ class AsyncSQL:
             await session.commit()
             return int(result.rowcount or 0)
 
-    async def bulk_add_2_days_to_subscription_dates(self) -> Tuple[int, int]:
-        """
-        Добавляет 2 дня ко всем непустым subscription_end_date и white_subscription_end_date.
-        Возвращает (число строк с обновлённой обычной датой, число строк с обновлённой white-датой).
-        """
+    async def bulk_add_2_days_to_subscription_dates(self) -> int:
+        """Добавляет 2 дня ко всем непустым subscription_end_date. Возвращает число обновлённых строк."""
         async with self.session_factory() as session:
             r1 = await session.execute(
                 text(
@@ -1160,15 +1127,8 @@ class AsyncSQL:
                     "WHERE subscription_end_date IS NOT NULL"
                 )
             )
-            r2 = await session.execute(
-                text(
-                    "UPDATE users SET white_subscription_end_date = "
-                    "white_subscription_end_date + interval '2 days' "
-                    "WHERE white_subscription_end_date IS NOT NULL"
-                )
-            )
             await session.commit()
-            return (int(r1.rowcount or 0), int(r2.rowcount or 0))
+            return int(r1.rowcount or 0)
 
     async def get_last_notification_date(self, user_id: int) -> Optional[date]:
         async with self.session_factory() as session:
@@ -1184,22 +1144,6 @@ class AsyncSQL:
             today = date.today()
             stmt = select(Users.user_id).where(
                 Users.is_delete == False
-            )
-            result = await session.execute(stmt)
-            return [row[0] for row in result.all()]
-
-    async def SELECT_USER_IDS_ACTIVE_WHITE_SUBSCRIPTION(self) -> List[int]:
-        """user_id с неистёкшей white-подпиской: дата окончания (календарный день UTC) ≥ сегодня UTC."""
-        today_utc = datetime.now(timezone.utc).date()
-        async with self.session_factory() as session:
-            stmt = (
-                select(Users.user_id)
-                .where(
-                    Users.is_delete == False,
-                    Users.white_subscription_end_date.isnot(None),
-                    cast(Users.white_subscription_end_date, Date) >= today_utc,
-                )
-                .order_by(Users.user_id)
             )
             result = await session.execute(stmt)
             return [row[0] for row in result.all()]
@@ -1872,7 +1816,6 @@ class AsyncSQL:
             "partner": user.partner,
             "create_user": user.create_user,
             "subscription_end_date": user.subscription_end_date,
-            "white_subscription_end_date": user.white_subscription_end_date,
             "in_panel": user.in_panel,
             "is_connect": user.is_connect,
             "is_delete": user.is_delete,
@@ -1955,12 +1898,10 @@ class AsyncSQL:
         return ref_totals, stamp_totals
 
     async def update_broadcast_status(self, user_id: int, status: str) -> None:
-        """
-        Обновляет статус последней рассылки и дату для указанного пользователя.
-        """
+        """Фиксирует дату последней рассылки (status оставлен для совместимости вызовов)."""
+        _ = status
         async with self.session_factory() as session:
             stmt = update(Users).where(Users.user_id == user_id).values(
-                last_broadcast_status=status,
                 last_broadcast_date=_naive_utc(datetime.now(timezone.utc)),
             )
             try:
@@ -2697,26 +2638,25 @@ class AsyncSQL:
     async def get_trafic_stat_source(
         self,
     ) -> Tuple[
-        List[Tuple[int, Optional[int], Optional[datetime], float, float]],
+        List[Tuple[int, Optional[datetime], float, float]],
         List[Tuple[int, datetime, Any, Optional[str], bool, str, Optional[str]]],
     ]:
         """
         Данные для /trafic_stat.
-        users: (user_id, linked_telegram_id, subscription_end_date, trafic_wl, limit_wl)
+        users: (user_id, subscription_end_date, trafic_wl, limit_wl)
         payments: (user_id, time_created, amount, payload, is_gift, channel, currency)
         channel: rub | stars | cryptobot. Успешные платежи (confirmed/paid).
         Активная подписка сейчас, trafic_wl > 7 ГБ, без тарифа «Навсегда».
         """
         from wl_traffic.constants import FOREVER_END_CUTOFF
 
-        users_rows: List[Tuple[int, Optional[int], Optional[datetime], float, float]] = []
+        users_rows: List[Tuple[int, Optional[datetime], float, float]] = []
         pay_rows: List[Tuple[int, datetime, Any, Optional[str], bool, str, Optional[str]]] = []
         now = datetime.now()
 
         async with self.session_factory() as session:
             uq = select(
                 Users.user_id,
-                Users.linked_telegram_id,
                 Users.subscription_end_date,
                 Users.trafic_wl,
                 Users.limit_wl,
@@ -2727,10 +2667,9 @@ class AsyncSQL:
                 Users.subscription_end_date < FOREVER_END_CUTOFF,
                 Users.trafic_wl > 7,
             )
-            for uid, linked, end_dt, trafic, limit_wl in (await session.execute(uq)).all():
+            for uid, end_dt, trafic, limit_wl in (await session.execute(uq)).all():
                 users_rows.append((
                     int(uid),
-                    int(linked) if linked is not None else None,
                     end_dt,
                     float(trafic or 0.0),
                     float(limit_wl or 0.0),
