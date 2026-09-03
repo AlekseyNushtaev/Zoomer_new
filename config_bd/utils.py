@@ -1481,6 +1481,9 @@ class AsyncSQL:
             .subquery()
         )
 
+    # Суммы тарифов 7 и 30 дней (текущие + исторические: 30old/secret, 249).
+    _SHORT_SUBSCRIPTION_AMOUNTS = (99, 149, 249, 299)
+
     @staticmethod
     def _subscription_payment_cond(table):
         """Успешная оплата своей подписки: не подарок и не докупка трафика Антиглушилка."""
@@ -1492,6 +1495,26 @@ class AsyncSQL:
                 ~table.payload.like("%duration:traffic%"),
             ),
         )
+
+    @staticmethod
+    def _short_subscription_duration_cond(table):
+        """Платёж за подписку на 7 или 30 дней (duration:7 / 30 / 30secret / 30old, иначе сумма)."""
+        payload_short = or_(
+            table.payload.like("%duration:7,%"),
+            table.payload.like("%duration:7"),
+            table.payload.like("%duration:30,%"),
+            table.payload.like("%duration:30"),
+            table.payload.like("%duration:30secret%"),
+            table.payload.like("%duration:30old%"),
+        )
+        amount_short = and_(
+            or_(
+                table.payload.is_(None),
+                ~table.payload.like("%duration:%"),
+            ),
+            table.amount.in_(AsyncSQL._SHORT_SUBSCRIPTION_AMOUNTS),
+        )
+        return or_(payload_short, amount_short)
 
     def _users_with_multiple_subscription_pays_subquery(self):
         """user_id с двумя и более успешными оплатами подписки (все платёжные таблицы)."""
@@ -1507,6 +1530,16 @@ class AsyncSQL:
             .having(func.count() > 1)
             .subquery()
         )
+
+    def _users_with_non_short_subscription_pays_subquery(self):
+        """user_id с хотя бы одной успешной оплатой подписки не на 7 или 30 дней."""
+        cond = self._subscription_payment_cond
+        short = self._short_subscription_duration_cond
+        parts = [
+            select(model.user_id).where(cond(model), ~short(model))
+            for model in _MERGE_PAYMENT_MODELS
+        ]
+        return union_all(*parts).subquery()
 
     def _build_broadcast_where(self, category: str, exclude_today: bool):
         """
@@ -1607,10 +1640,12 @@ class AsyncSQL:
             )
         if category == "paid_at_most_once":
             multi_paid = self._users_with_multiple_subscription_pays_subquery()
+            non_short_paid = self._users_with_non_short_subscription_pays_subquery()
             return wrap(
                 and_(
                     Users.is_delete == False,
                     Users.user_id.notin_(multi_paid),
+                    Users.user_id.notin_(non_short_paid),
                     or_(
                         Users.field_bool_3.is_(False),
                         Users.field_bool_3.is_(None),
