@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, BigInteger, Date, Float
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, BigInteger, Date, Float, ForeignKey
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase
 from datetime import datetime
@@ -42,12 +42,8 @@ class Users(Base):
     stamp = Column(String(100), nullable=False)
     ttclid = Column(String(100), nullable=True)
     subscribtion = Column(String(255), nullable=True)
-    email = Column(Text, nullable=True, unique=True)
-    password_hash = Column(Text, nullable=True)
-    activation_pass = Column(String(255), nullable=True)
     field_str_1 = Column(String(255), nullable=True)
     field_str_2 = Column(String(255), nullable=True)
-    field_bool_1 = Column(Boolean, default=False)
     field_bool_2 = Column(Boolean, default=False)
     field_bool_3 = Column(Boolean, default=False)
     partner = Column(String(100), nullable=True)
@@ -56,6 +52,23 @@ class Users(Base):
     partner_flag = Column(Boolean, default=False)
     trafic_wl = Column(Float, default=0.0)
     limit_wl = Column(Float, default=0.0)
+
+
+class FirstSite(Base):
+    """Данные веб-аккаунта (email/пароль), связь с users по tg_id (= users.user_id)."""
+    __tablename__ = 'first_site'
+
+    id = Column(Integer, primary_key=True)
+    tg_id = Column(
+        BigInteger,
+        ForeignKey('users.user_id', ondelete='CASCADE'),
+        unique=True,
+        nullable=False,
+    )
+    email = Column(Text, nullable=True, unique=True)
+    password_hash = Column(Text, nullable=True)
+    activation_pass = Column(String(255), nullable=True)
+    field_bool_1 = Column(Boolean, default=False)
 
 
 class WlTrafficMeta(Base):

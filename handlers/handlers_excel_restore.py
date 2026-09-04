@@ -32,6 +32,7 @@ from config_bd.models import (
     PaymentsWataCard,
     PaymentsWataSBP,
     Users,
+    FirstSite,
     WhiteCounter,
 )
 from logging_config import logger
@@ -160,7 +161,6 @@ _USER_DEFAULTS: Dict[str, Any] = {
     "is_connect": False,
     "in_chanel": False,
     "reserve_field": False,
-    "field_bool_1": False,
     "field_bool_2": False,
     "field_bool_3": False,
 }
@@ -198,6 +198,34 @@ def _build_user(row_map: Dict[str, Any]) -> Optional[Users]:
         return Users(**{k: v for k, v in kwargs.items() if k in col_keys})
     except Exception:
         logger.exception("users row skip")
+        return None
+
+
+def _build_first_site(row_map: Dict[str, Any]) -> Optional[FirstSite]:
+    lower = {_norm_header(k): v for k, v in row_map.items() if k is not None}
+    by_attr: Dict[str, Any] = {}
+    for c in FirstSite.__table__.columns:
+        key = c.key
+        nk = _norm_header(key)
+        raw = None
+        if key in row_map:
+            raw = row_map[key]
+        elif nk in lower:
+            raw = lower[nk]
+        if raw is None or raw == "":
+            continue
+        by_attr[key] = _coerce_for_column(FirstSite, key, raw)
+    if by_attr.get("tg_id") is None:
+        return None
+    col_keys = {c.key for c in FirstSite.__table__.columns}
+    kwargs: Dict[str, Any] = {k: v for k, v in by_attr.items() if k in col_keys}
+    kwargs.pop("id", None)
+    if "field_bool_1" not in kwargs:
+        kwargs["field_bool_1"] = False
+    try:
+        return FirstSite(**kwargs)
+    except Exception:
+        logger.exception("first_site row skip")
         return None
 
 
@@ -282,6 +310,7 @@ def _parse_workbook(path: str) -> Dict[str, List[Any]]:
     wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
     out: Dict[str, List[Any]] = {
         "users": [],
+        "first_site": [],
         "payments": [],
         "payments_cards": [],
         "payments_platega_crypto": [],
@@ -308,6 +337,15 @@ def _parse_workbook(path: str) -> Dict[str, List[Any]]:
             u = _build_user(d)
             if u:
                 out["users"].append(u)
+
+    if get("first_site"):
+        ws = wb[get("first_site")]
+        headers, data = _iter_sheet_rows(ws)
+        for row in data:
+            d = _row_to_dict(headers, row)
+            site = _build_first_site(d)
+            if site:
+                out["first_site"].append(site)
 
     def load_payments(sheet_key: str, model: Type, out_key: str):
         sn = get(sheet_key)
@@ -511,7 +549,7 @@ async def import_excel_start(message: Message) -> None:
     await message.answer(
         "📥 Отправьте файл <b>.xlsx</b> (желательно из <code>/export_partner</code>) "
         "<b>следующим сообщением</b>.\n\n"
-        "⚠️ Все текущие данные в таблицах users, платежах, gifts, online, white_counter "
+        "⚠️ Все текущие данные в таблицах users, first_site, платежах, gifts, online, white_counter "
         "будут <b>удалены</b> и заменены содержимым файла.\n\n"
         "📎 Через бота можно скачать файл до <b>20 МБ</b> (ограничение Telegram API). "
         "Больше — залейте .xlsx на сервер и выполните:\n"

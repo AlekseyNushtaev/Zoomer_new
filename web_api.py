@@ -1415,7 +1415,7 @@ async def auth_register(body: RegisterIn, request: Request):
     stamp = _normalize_stamp(body.stamp)
     existing = await sql.get_user_by_email(str(body.email))
     if existing:
-        email_verified = bool(existing[24])
+        email_verified = bool(existing[19])
         if email_verified:
             raise HTTPException(status.HTTP_409_CONFLICT, "Email уже зарегистрирован")
         # Not verified yet — resend code
@@ -1650,7 +1650,8 @@ async def user_profile(ctx: JwtCtx):
         user = await sql.get_user_object_by_user_id(int(ctx["user_id"]))
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
-    return user_row_to_api_dict(user)
+    site = await sql.get_first_site_by_tg_id(int(user.user_id))
+    return user_row_to_api_dict(user, site)
 
 
 @app.post("/api/user/change-password")

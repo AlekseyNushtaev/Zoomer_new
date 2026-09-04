@@ -12,7 +12,7 @@ from openpyxl.styles import Alignment, Border, Side, PatternFill
 
 from bot import bot, sql, x3
 from config import ADMIN_IDS
-from config_bd.models import Users
+from config_bd.models import Users, FirstSite
 from config_bd.utils import (
     _billing_duration_from_amount_fallback,
     _parse_traffic_duration,
@@ -44,12 +44,8 @@ router = Router()
 _EXCEL_COL_WIDTH_MAX = 255
 
 _USERS_EXPORT_PARTNER_EXCLUDED = frozenset({
-    "email",
-    "password_hash",
-    "activation_pass",
     "field_str_1",
     "field_str_2",
-    "field_bool_1",
     "field_bool_2",
     "field_bool_3",
     "ttclid",
@@ -58,10 +54,14 @@ _USERS_EXPORT_PARTNER_EXCLUDED = frozenset({
     "in_chanel",
 })
 
+_FIRST_SITE_EXPORT_PARTNER_EXCLUDED = frozenset({
+    "password_hash",
+    "activation_pass",
+})
+
 _USERS_EXPORT_COLUMNS_DEFAULT = (
     "id",
     "user_id",
-    "email",
     "ref",
     "is_delete",
     "in_panel",
@@ -75,6 +75,16 @@ _USERS_EXPORT_COLUMNS_DEFAULT = (
     "ttclid",
     "field_bool_3",
 )
+
+
+def _first_site_sheet_column_names(users_full_columns: bool) -> list[str]:
+    if users_full_columns:
+        return [
+            c.key
+            for c in FirstSite.__table__.columns
+            if c.key not in _FIRST_SITE_EXPORT_PARTNER_EXCLUDED
+        ]
+    return ["tg_id", "email", "field_bool_1"]
 
 
 def _user_sheet_column_names(users_full_columns: bool) -> list[str]:
@@ -121,6 +131,7 @@ async def _export_database_to_excel_impl(
 
         def _sync_build_export() -> str:
             users_list = snapshot["users"]
+            first_site_list = snapshot.get("first_site") or []
             payments_list = snapshot["payments"]
             payments_cards_list = snapshot["payments_cards"]
             payments_platega_crypto_list = snapshot["payments_platega_crypto"]
@@ -142,6 +153,7 @@ async def _export_database_to_excel_impl(
                                  top=Side(style='thin'), bottom=Side(style='thin'))
 
             ws_users = None
+            ws_first_site = None
             if include_users:
                 # --- Лист USERS ---
                 ws_users = wb.create_sheet(title="users")
@@ -165,6 +177,25 @@ async def _export_database_to_excel_impl(
                         if cell.value:
                             max_len = max(max_len, len(str(cell.value)))
                     ws_users.column_dimensions[col_letter].width = min(max_len + 2, _EXCEL_COL_WIDTH_MAX)
+
+                ws_first_site = wb.create_sheet(title="first_site")
+                first_site_columns = _first_site_sheet_column_names(users_full_columns)
+                for col_num, title in enumerate(first_site_columns, 1):
+                    cell = ws_first_site.cell(row=1, column=col_num, value=title)
+                    cell.alignment = header_alignment
+                    cell.border = thin_border
+                for row_num, site in enumerate(first_site_list, 2):
+                    row_data = [_excel_scalar(getattr(site, name)) for name in first_site_columns]
+                    for col_num, value in enumerate(row_data, 1):
+                        cell = ws_first_site.cell(row=row_num, column=col_num, value=value)
+                        cell.border = thin_border
+                for col in ws_first_site.columns:
+                    max_len = 0
+                    col_letter = col[0].column_letter
+                    for cell in col:
+                        if cell.value:
+                            max_len = max(max_len, len(str(cell.value)))
+                    ws_first_site.column_dimensions[col_letter].width = min(max_len + 2, _EXCEL_COL_WIDTH_MAX)
 
             # --- Лист PAYMENTS (Platega) ---
             ws_payments = wb.create_sheet(title="payments_sbp")
@@ -479,6 +510,8 @@ async def _export_database_to_excel_impl(
             ]
             if ws_users is not None:
                 sheets_to_freeze.insert(0, ws_users)
+            if ws_first_site is not None:
+                sheets_to_freeze.insert(1 if ws_users is not None else 0, ws_first_site)
             for ws in sheets_to_freeze:
                 ws.freeze_panes = ws['A2']
 

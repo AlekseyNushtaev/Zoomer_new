@@ -9,6 +9,7 @@ from typing import Any, Optional, List, Tuple, Dict
 from config_bd.models import (
     AsyncSessionLocal,
     Users,
+    FirstSite,
     Payments,
     Gifts,
     PaymentsCryptobot,
@@ -167,7 +168,13 @@ def _naive_utc(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-def _user_tuple(user: Users) -> Tuple:
+def _site_auth_from_first_site(site: Optional[FirstSite]) -> Tuple[Optional[str], Optional[str], bool, Optional[str]]:
+    if site is None:
+        return None, None, False, None
+    return site.email, site.activation_pass, bool(site.field_bool_1), site.password_hash
+
+
+def _user_tuple(user: Users, site: Optional[FirstSite] = None) -> Tuple:
     """
     Кортеж get_user / get_user_by_email / get_user_by_internal_id.
     0 id, 1 user_id, 2 ref, 3 is_delete, 4 in_panel, 5 is_connect,
@@ -177,7 +184,9 @@ def _user_tuple(user: Users) -> Tuple:
     19 field_bool_1, 20 field_bool_2, 21 field_bool_3, 22 password_hash,
     23 partner, 24 partner_balance, 25 partner_pay, 26 partner_flag,
     27 trafic_wl, 28 limit_wl.
+    Индексы 15–16, 19, 22 — из first_site (совместимость с web_api).
     """
+    email, activation_pass, field_bool_1, password_hash = _site_auth_from_first_site(site)
     return (
         user.id,
         user.user_id,
@@ -194,14 +203,14 @@ def _user_tuple(user: Users) -> Tuple:
         user.stamp,
         user.ttclid,
         user.subscribtion,
-        user.email,
-        user.activation_pass,
+        email,
+        activation_pass,
         user.field_str_1,
         user.field_str_2,
-        user.field_bool_1,
+        field_bool_1,
         user.field_bool_2,
         user.field_bool_3,
-        user.password_hash,
+        password_hash,
         user.partner,
         user.partner_balance,
         user.partner_pay,
@@ -227,11 +236,16 @@ def _users_column_value_for_api(v: Any) -> Any:
     return v
 
 
-def user_row_to_api_dict(user: Users) -> Dict[str, Any]:
-    """Все колонки таблицы users в JSON-совместимый словарь (имена полей как в БД)."""
+def user_row_to_api_dict(user: Users, first_site: Optional[FirstSite] = None) -> Dict[str, Any]:
+    """Колонки users + поля first_site в JSON (имена как раньше в API)."""
     out: Dict[str, Any] = {}
     for col in Users.__table__.columns:
         out[col.key] = _users_column_value_for_api(getattr(user, col.key))
+    email, activation_pass, field_bool_1, password_hash = _site_auth_from_first_site(first_site)
+    out["email"] = _users_column_value_for_api(email)
+    out["activation_pass"] = _users_column_value_for_api(activation_pass)
+    out["field_bool_1"] = field_bool_1
+    out["password_hash"] = _users_column_value_for_api(password_hash)
     return out
 
 
@@ -336,30 +350,44 @@ class AsyncSQL:
     def __init__(self):
         self.session_factory = AsyncSessionLocal
 
+    @staticmethod
+    async def _first_site_for_tg_id(session, tg_id: int) -> Optional[FirstSite]:
+        stmt = select(FirstSite).where(FirstSite.tg_id == tg_id)
+        return (await session.execute(stmt)).scalar_one_or_none()
+
+    async def get_first_site_by_tg_id(self, tg_id: int) -> Optional[FirstSite]:
+        async with self.session_factory() as session:
+            return await self._first_site_for_tg_id(session, tg_id)
+
     async def get_user(self, user_id: int) -> Optional[Tuple]:
         async with self.session_factory() as session:
             stmt = select(Users).where(Users.user_id == user_id)
             result = await session.execute(stmt)
             user = result.scalar_one_or_none()
             if user:
-                return _user_tuple(user)
+                site = await self._first_site_for_tg_id(session, user.user_id)
+                return _user_tuple(user, site)
             return None
 
     async def get_user_by_internal_id(self, internal_id: int) -> Optional[Tuple]:
         async with self.session_factory() as session:
             user = await session.get(Users, internal_id)
             if user:
-                return _user_tuple(user)
+                site = await self._first_site_for_tg_id(session, user.user_id)
+                return _user_tuple(user, site)
             return None
 
     async def get_user_by_email(self, email: str) -> Optional[Tuple]:
         em = _norm_email(email)
         async with self.session_factory() as session:
-            stmt = select(Users).where(func.lower(Users.email) == em)
-            result = await session.execute(stmt)
-            user = result.scalar_one_or_none()
+            stmt = select(FirstSite).where(func.lower(FirstSite.email) == em)
+            site = (await session.execute(stmt)).scalar_one_or_none()
+            if site is None:
+                return None
+            stmt = select(Users).where(Users.user_id == site.tg_id)
+            user = (await session.execute(stmt)).scalar_one_or_none()
             if user:
-                return _user_tuple(user)
+                return _user_tuple(user, site)
             return None
 
     async def get_user_object_by_user_id(self, user_id: int) -> Optional[Users]:
@@ -396,12 +424,19 @@ class AsyncSQL:
         async with self.session_factory() as session:
             u = Users(
                 user_id=uid,
-                email=em,
-                password_hash=password_hash,
                 stamp=stamp,
                 create_user=_naive_utc(datetime.now(timezone.utc)),
             )
             session.add(u)
+            await session.flush()
+            session.add(
+                FirstSite(
+                    tg_id=uid,
+                    email=em,
+                    password_hash=password_hash,
+                    field_bool_1=False,
+                )
+            )
             await session.commit()
             await session.refresh(u)
             return int(u.id)
@@ -422,9 +457,12 @@ class AsyncSQL:
 
     async def set_password_hash_by_internal_id(self, internal_id: int, password_hash: str) -> bool:
         async with self.session_factory() as session:
+            user = await session.get(Users, internal_id)
+            if user is None:
+                return False
             stmt = (
-                update(Users)
-                .where(Users.id == internal_id)
+                update(FirstSite)
+                .where(FirstSite.tg_id == user.user_id)
                 .values(password_hash=password_hash)
             )
             r = await session.execute(stmt)
@@ -435,8 +473,8 @@ class AsyncSQL:
         em = _norm_email(email)
         async with self.session_factory() as session:
             stmt = (
-                update(Users)
-                .where(func.lower(Users.email) == em)
+                update(FirstSite)
+                .where(func.lower(FirstSite.email) == em)
                 .values(activation_pass=value)
             )
             r = await session.execute(stmt)
@@ -445,9 +483,12 @@ class AsyncSQL:
 
     async def set_email_verified(self, internal_id: int, verified: bool) -> bool:
         async with self.session_factory() as session:
+            user = await session.get(Users, internal_id)
+            if user is None:
+                return False
             stmt = (
-                update(Users)
-                .where(Users.id == internal_id)
+                update(FirstSite)
+                .where(FirstSite.tg_id == user.user_id)
                 .values(field_bool_1=verified)
             )
             r = await session.execute(stmt)
@@ -525,7 +566,7 @@ class AsyncSQL:
     ) -> bool:
         """
         Сливает строку только-email (user_id < 0) в строку Telegram (user_id > 0).
-        Email и password_hash переносятся на telegram-строку; placeholder удаляется.
+        Данные first_site переносятся на tg_id Telegram; placeholder удаляется.
         """
         async with self.session_factory() as session:
             e = await session.get(Users, email_row_internal_id)
@@ -538,12 +579,35 @@ class AsyncSQL:
 
             merge_now = datetime.now(timezone.utc)
 
-            # uq_users_email: нельзя присвоить t.email пока та же строка есть у e — сначала снимаем с placeholder
-            merged_email = e.email
-            merged_password_hash = e.password_hash
-            e.email = None
-            e.password_hash = None
-            await session.flush()
+            fs_e = await self._first_site_for_tg_id(session, e.user_id)
+            fs_t = await self._first_site_for_tg_id(session, t.user_id)
+
+            merged_email = fs_e.email if fs_e else None
+            merged_password_hash = fs_e.password_hash if fs_e else None
+            merged_verified = bool(fs_e.field_bool_1) if fs_e else False
+            merged_activation = fs_e.activation_pass if fs_e else None
+
+            if fs_e is not None:
+                fs_e.email = None
+                fs_e.password_hash = None
+                fs_e.activation_pass = None
+                await session.flush()
+
+            if fs_t is None and fs_e is not None:
+                fs_e.tg_id = telegram_user_id
+                fs_e.email = merged_email
+                fs_e.password_hash = merged_password_hash
+                fs_e.activation_pass = merged_activation
+                fs_e.field_bool_1 = merged_verified
+            elif fs_t is not None and fs_e is not None:
+                if merged_email and not fs_t.email:
+                    fs_t.email = merged_email
+                if merged_password_hash and not fs_t.password_hash:
+                    fs_t.password_hash = merged_password_hash
+                if merged_activation and not fs_t.activation_pass:
+                    fs_t.activation_pass = merged_activation
+                fs_t.field_bool_1 = bool(fs_t.field_bool_1 or merged_verified)
+                await session.delete(fs_e)
 
             t_paid_pro, _t_paid_white = await _merge_user_paid_subscription_flags(session, t.user_id)
             e_paid_pro, _e_paid_white = await _merge_user_paid_subscription_flags(session, e.user_id)
@@ -563,10 +627,6 @@ class AsyncSQL:
             t.reserve_field = bool(t.reserve_field or e.reserve_field)
             if not (t.ref or "") and (e.ref or ""):
                 t.ref = e.ref
-            if merged_email:
-                t.email = merged_email
-            if merged_password_hash:
-                t.password_hash = merged_password_hash
             if (e.stamp or "") and (e.stamp or "") != "email":
                 if not (t.stamp or "") or (t.stamp or "") == "email":
                     t.stamp = e.stamp
@@ -574,7 +634,6 @@ class AsyncSQL:
                 t.ttclid = e.ttclid
             if not (t.subscribtion or "") and (e.subscribtion or ""):
                 t.subscribtion = e.subscribtion
-            t.field_bool_1 = bool(t.field_bool_1 or e.field_bool_1)
             t.field_bool_2 = bool(t.field_bool_2 or e.field_bool_2)
             t.field_bool_3 = bool(t.field_bool_3 or e.field_bool_3)
 
@@ -726,12 +785,8 @@ class AsyncSQL:
                         last_notification_date=None,
                         last_broadcast_date=None,
                         ttclid=None,
-                        email=None,
-                        password_hash=None,
-                        activation_pass=None,
                         field_str_1=None,
                         field_str_2=None,
-                        field_bool_1=False,
                         field_bool_2=False,
                         field_bool_3=False,
                     )
@@ -922,7 +977,7 @@ class AsyncSQL:
 
     async def update_field_bool_1(self, user_id: int, value: bool):
         async with self.session_factory() as session:
-            stmt = update(Users).where(Users.user_id == user_id).values(field_bool_1=value)
+            stmt = update(FirstSite).where(FirstSite.tg_id == user_id).values(field_bool_1=value)
             await session.execute(stmt)
             await session.commit()
 
@@ -1758,6 +1813,7 @@ class AsyncSQL:
             if not user:
                 logger.warning(f"User {user_id} not found for deletion")
                 return False
+            await session.execute(delete(FirstSite).where(FirstSite.tg_id == user_id))
             await session.delete(user)
             await session.commit()
             logger.info(f"✅ Удалено пользователей: 1 (User_id: {user_id})")
@@ -1770,7 +1826,12 @@ class AsyncSQL:
         async with self.session_factory() as session:
             stmt = select(Users).where(Users.stamp.in_(stamps)).order_by(Users.stamp, Users.id)
             result = await session.execute(stmt)
-            return [self._user_delete_snapshot(u) for u in result.scalars().all()]
+            users = list(result.scalars().all())
+            snapshots = []
+            for u in users:
+                site = await self._first_site_for_tg_id(session, u.user_id)
+                snapshots.append(self._user_delete_snapshot(u, site))
+            return snapshots
 
     async def delete_users_by_stamps(self, stamps: List[str]) -> List[Dict[str, Any]]:
         """
@@ -1786,13 +1847,26 @@ class AsyncSQL:
             if not users:
                 return []
 
-            snapshots = [self._user_delete_snapshot(u) for u in users]
+            tg_ids = [u.user_id for u in users]
+            site_stmt = select(FirstSite).where(FirstSite.tg_id.in_(tg_ids))
+            sites = list((await session.execute(site_stmt)).scalars().all())
+            site_by_tg = {s.tg_id: s for s in sites}
+
+            snapshots = [
+                self._user_delete_snapshot(u, site_by_tg.get(u.user_id))
+                for u in users
+            ]
             internal_ids = [u.id for u in users]
-            emails = [u.email for u in users if u.email]
+            emails = [s.email for s in sites if s.email]
 
             for i in range(0, len(internal_ids), _STAT_IN_CHUNK):
                 chunk = internal_ids[i : i + _STAT_IN_CHUNK]
                 await session.execute(delete(LinkingCodes).where(LinkingCodes.user_id.in_(chunk)))
+            for i in range(0, len(tg_ids), _STAT_IN_CHUNK):
+                chunk = tg_ids[i : i + _STAT_IN_CHUNK]
+                await session.execute(delete(FirstSite).where(FirstSite.tg_id.in_(chunk)))
+            for i in range(0, len(internal_ids), _STAT_IN_CHUNK):
+                chunk = internal_ids[i : i + _STAT_IN_CHUNK]
                 await session.execute(delete(Users).where(Users.id.in_(chunk)))
             for i in range(0, len(emails), _STAT_IN_CHUNK):
                 await session.execute(
@@ -1806,12 +1880,12 @@ class AsyncSQL:
             return snapshots
 
     @staticmethod
-    def _user_delete_snapshot(user: Users) -> Dict[str, Any]:
+    def _user_delete_snapshot(user: Users, site: Optional[FirstSite] = None) -> Dict[str, Any]:
         return {
             "id": user.id,
             "user_id": user.user_id,
             "stamp": user.stamp,
-            "email": user.email,
+            "email": site.email if site else None,
             "ref": user.ref,
             "partner": user.partner,
             "create_user": user.create_user,
@@ -2771,9 +2845,13 @@ class AsyncSQL:
         """
         async with self.session_factory() as session:
             users_list: List[Any] = []
+            first_site_list: List[Any] = []
             if include_users:
                 users_list = (
                     await session.execute(select(Users).order_by(Users.create_user.asc()))
+                ).scalars().all()
+                first_site_list = (
+                    await session.execute(select(FirstSite).order_by(FirstSite.tg_id.asc()))
                 ).scalars().all()
             payments_list = (await session.execute(select(Payments))).scalars().all()
             payments_cards_list = (await session.execute(select(PaymentsCards))).scalars().all()
@@ -2788,6 +2866,7 @@ class AsyncSQL:
             white_counter_list = (await session.execute(select(WhiteCounter))).scalars().all()
         return {
             "users": users_list,
+            "first_site": first_site_list,
             "payments": payments_list,
             "payments_cards": payments_cards_list,
             "payments_platega_crypto": payments_platega_crypto_list,
@@ -2805,6 +2884,7 @@ class AsyncSQL:
         self,
         *,
         users: List[Users],
+        first_site: Optional[List[FirstSite]] = None,
         payments: List[Payments],
         payments_cards: List[PaymentsCards],
         payments_platega_crypto: List[PaymentsPlategaCrypto],
@@ -2822,6 +2902,7 @@ class AsyncSQL:
         затем вставка списков ORM-объектов. Таблицы linking_codes / password_reset_codes не трогаются.
         """
         batch = 500
+        first_site = first_site or []
 
         async with self.session_factory() as session:
             async with session.begin():
@@ -2829,7 +2910,7 @@ class AsyncSQL:
                     text(
                         "TRUNCATE TABLE payments, payments_cards, payments_platega_crypto, "
                         "payments_stars, payments_cryptobot, payments_wata_sbp, payments_wata_card, payments_fk_sbp, "
-                        "gifts, online, white_counter, users RESTART IDENTITY CASCADE"
+                        "gifts, online, white_counter, first_site, users RESTART IDENTITY CASCADE"
                     )
                 )
 
@@ -2838,6 +2919,7 @@ class AsyncSQL:
                         session.add_all(objs[i : i + batch])
 
                 add_chunk(users)
+                add_chunk(first_site)
                 add_chunk(payments)
                 add_chunk(payments_cards)
                 add_chunk(payments_platega_crypto)
@@ -2854,6 +2936,7 @@ class AsyncSQL:
 
                 for tbl, col in (
                     ("users", "id"),
+                    ("first_site", "id"),
                     ("payments", "id"),
                     ("payments_cards", "id"),
                     ("payments_platega_crypto", "id"),
@@ -2874,6 +2957,7 @@ class AsyncSQL:
 
         return {
             "users": len(users),
+            "first_site": len(first_site),
             "payments": len(payments),
             "payments_cards": len(payments_cards),
             "payments_platega_crypto": len(payments_platega_crypto),
