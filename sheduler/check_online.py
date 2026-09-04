@@ -39,13 +39,18 @@ async def check_online_daily():
                 else:
                     users_trial += 1
 
-        # 4. Запись в БД
-        await sql.add_online_stats(users_panel, users_active, users_pay, users_trial)
+        # 4. Люди с хотя бы одной активной подпиской в БД
+        users_subscribed = await sql.count_users_with_active_subscription()
+
+        # 5. Запись в БД
+        await sql.add_online_stats(
+            users_panel, users_active, users_pay, users_trial, users_subscribed
+        )
 
         logger.info(
             f"✅ Статистика online записана: "
             f"panel={users_panel}, active={users_active}, "
-            f"pay={users_pay}, trial={users_trial}"
+            f"pay={users_pay}, trial={users_trial}, subscribed={users_subscribed}"
         )
 
     except Exception as e:

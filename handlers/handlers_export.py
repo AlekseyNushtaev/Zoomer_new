@@ -419,7 +419,10 @@ async def _export_database_to_excel_impl(
 
             # --- Лист ONLINE ---
             ws_online = wb.create_sheet(title="online")
-            online_columns = ['ID', 'Дата сбора', 'Всего в панели', 'Активны сегодня', 'Платных', 'Триальных']
+            online_columns = [
+                'ID', 'Дата сбора', 'Всего в панели', 'Активны сегодня',
+                'Платных', 'Триальных', 'С активной подпиской',
+            ]
             for col_num, title in enumerate(online_columns, 1):
                 cell = ws_online.cell(row=1, column=col_num, value=title)
                 cell.alignment = header_alignment
@@ -428,7 +431,8 @@ async def _export_database_to_excel_impl(
             for row_num, rec in enumerate(online_list, 2):
                 row_data = [
                     rec.online_id, rec.online_date, rec.users_panel,
-                    rec.users_active, rec.users_pay, rec.users_trial
+                    rec.users_active, rec.users_pay, rec.users_trial,
+                    rec.users_subscribed,
                 ]
                 for col_num, value in enumerate(row_data, 1):
                     if col_num == 2 and value and isinstance(value, datetime):

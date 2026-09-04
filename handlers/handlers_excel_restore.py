@@ -250,6 +250,7 @@ _ONLINE_ATTR_BY_HEADER = {
     "активны_сегодня": "users_active",
     "платных": "users_pay",
     "триальных": "users_trial",
+    "с_активной_подпиской": "users_subscribed",
 }
 
 
@@ -262,7 +263,7 @@ def _map_online_row(headers: List[Any], row: Tuple[Any, ...]) -> Dict[str, Any]:
         if not attr:
             continue
         out[attr] = _coerce_for_column(Online, attr, v)
-    for f in ("users_panel", "users_active", "users_pay", "users_trial"):
+    for f in ("users_panel", "users_active", "users_pay", "users_trial", "users_subscribed"):
         if f not in out or out[f] is None:
             out[f] = 0
     return out

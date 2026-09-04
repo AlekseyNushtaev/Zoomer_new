@@ -204,6 +204,7 @@ class Online(Base):
     users_active = Column(Integer, nullable=False)
     users_pay = Column(Integer, nullable=False)
     users_trial = Column(Integer, nullable=False)
+    users_subscribed = Column(Integer, nullable=False, default=0)
 
 
 class LinkingCodes(Base):
