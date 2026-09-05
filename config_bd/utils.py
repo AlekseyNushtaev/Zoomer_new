@@ -10,6 +10,7 @@ from config_bd.models import (
     AsyncSessionLocal,
     Users,
     FirstSite,
+    SecondSite,
     Payments,
     Gifts,
     PaymentsCryptobot,
@@ -440,6 +441,140 @@ class AsyncSQL:
             await session.commit()
             await session.refresh(u)
             return int(u.id)
+
+    LANDING_USER_ID_START = -50001
+
+    @staticmethod
+    async def _second_site_for_tg_id(session, tg_id: int) -> Optional[SecondSite]:
+        stmt = select(SecondSite).where(SecondSite.tg_id == tg_id)
+        return (await session.execute(stmt)).scalar_one_or_none()
+
+    async def get_landing_site_by_tg_id(self, tg_id: int) -> Optional[SecondSite]:
+        async with self.session_factory() as session:
+            return await self._second_site_for_tg_id(session, tg_id)
+
+    async def get_landing_user_by_email(self, email: str) -> Optional[Tuple[Users, SecondSite]]:
+        em = _norm_email(email)
+        async with self.session_factory() as session:
+            stmt = select(SecondSite).where(func.lower(SecondSite.email) == em)
+            site = (await session.execute(stmt)).scalar_one_or_none()
+            if site is None:
+                return None
+            stmt = select(Users).where(Users.user_id == site.tg_id)
+            user = (await session.execute(stmt)).scalar_one_or_none()
+            if user is None:
+                return None
+            return user, site
+
+    async def get_landing_user_by_google_sub(self, google_sub: str) -> Optional[Tuple[Users, SecondSite]]:
+        async with self.session_factory() as session:
+            stmt = select(SecondSite).where(SecondSite.google_sub == google_sub)
+            site = (await session.execute(stmt)).scalar_one_or_none()
+            if site is None:
+                return None
+            stmt = select(Users).where(Users.user_id == site.tg_id)
+            user = (await session.execute(stmt)).scalar_one_or_none()
+            if user is None:
+                return None
+            return user, site
+
+    async def get_landing_user_by_internal_id(self, internal_id: int) -> Optional[Tuple[Users, SecondSite]]:
+        async with self.session_factory() as session:
+            user = await session.get(Users, internal_id)
+            if user is None:
+                return None
+            site = await self._second_site_for_tg_id(session, user.user_id)
+            if site is None:
+                return None
+            return user, site
+
+    async def next_landing_user_id(self) -> int:
+        """Следующий user_id для landing: -50001, -50002, …"""
+        start = self.LANDING_USER_ID_START
+        async with self.session_factory() as session:
+            stmt = select(func.min(Users.user_id)).where(Users.user_id <= start)
+            result = await session.execute(stmt)
+            m = result.scalar_one_or_none()
+            if m is None:
+                return start
+            return int(m) - 1
+
+    async def register_landing_email_user(
+        self, email: str, stamp: str = "", site_url: Optional[str] = None
+    ) -> int:
+        em = _norm_email(email)
+        uid = await self.next_landing_user_id()
+        async with self.session_factory() as session:
+            u = Users(
+                user_id=uid,
+                stamp=stamp,
+                create_user=_naive_utc(datetime.now(timezone.utc)),
+            )
+            session.add(u)
+            await session.flush()
+            session.add(
+                SecondSite(
+                    tg_id=uid,
+                    email=em,
+                    site_url=site_url,
+                    verified=False,
+                )
+            )
+            await session.commit()
+            await session.refresh(u)
+            return int(u.id)
+
+    async def register_landing_google_user(
+        self, email: str, google_sub: str, stamp: str = "", site_url: Optional[str] = None
+    ) -> int:
+        em = _norm_email(email)
+        uid = await self.next_landing_user_id()
+        async with self.session_factory() as session:
+            u = Users(
+                user_id=uid,
+                stamp=stamp,
+                create_user=_naive_utc(datetime.now(timezone.utc)),
+            )
+            session.add(u)
+            await session.flush()
+            session.add(
+                SecondSite(
+                    tg_id=uid,
+                    email=em,
+                    google_sub=google_sub,
+                    site_url=site_url,
+                    verified=True,
+                )
+            )
+            await session.commit()
+            await session.refresh(u)
+            return int(u.id)
+
+    async def set_landing_activation_pass_by_email(self, email: str, value) -> bool:
+        em = _norm_email(email)
+        async with self.session_factory() as session:
+            stmt = (
+                update(SecondSite)
+                .where(func.lower(SecondSite.email) == em)
+                .values(activation_pass=value)
+            )
+            r = await session.execute(stmt)
+            await session.commit()
+            return (r.rowcount or 0) > 0
+
+    async def set_landing_email_verified(self, internal_id: int, verified: bool) -> bool:
+        async with self.session_factory() as session:
+            user = await session.get(Users, internal_id)
+            if user is None:
+                return False
+            stmt = (
+                update(SecondSite)
+                .where(SecondSite.tg_id == user.user_id)
+                .values(verified=verified)
+            )
+            r = await session.execute(stmt)
+            await session.commit()
+            return (r.rowcount or 0) > 0
 
     async def set_user_stamp_by_internal_id(self, internal_id: int, stamp: str) -> bool:
         """Обновляет stamp только если текущее значение пустое или 'email'."""
@@ -1663,6 +1798,14 @@ class AsyncSQL:
                         Users.subscription_end_date.is_(None),
                         Users.subscription_end_date < FOREVER_END_CUTOFF,
                     ),
+                )
+            )
+        if category == "active_subscription":
+            return wrap(
+                and_(
+                    Users.is_delete == False,
+                    Users.subscription_end_date.isnot(None),
+                    func.date(Users.subscription_end_date) >= today_d,
                 )
             )
         return None

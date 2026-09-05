@@ -46,6 +46,12 @@ PUBLIC_SITE_URL: str = (os.environ.get("PUBLIC_SITE_URL") or "").strip().rstrip(
 
 JWT_SECRET: Optional[str] = os.environ.get("JWT_SECRET")
 GOOGLE_CLIENT_ID: Optional[str] = os.environ.get("GOOGLE_CLIENT_ID")
+LANDING_GOOGLE_CLIENT_ID: Optional[str] = (
+    os.environ.get("LANDING_GOOGLE_CLIENT_ID") or os.environ.get("GOOGLE_CLIENT_ID")
+)
+LANDING_SITE_URL: str = (
+    os.environ.get("LANDING_SITE_URL") or "http://localhost:5173"
+).strip().rstrip("/")
 WEB_API_PORT: int = int(os.environ.get("WEB_API_PORT", "8080"))
 
 # Кастомная страница подписки: /api/v1/sub_page/* (заголовок X-Sub-Page-Api-Key или Bearer).
@@ -58,12 +64,13 @@ THROTTLE_WINDOW_SEC: float = float(os.environ.get("THROTTLE_WINDOW_SEC", "8"))
 # Максимум одновременно «висящих» счетов на пользователя (WATA СБП/карта, Platega, Cryptobot — в сумме).
 PAYMENT_MAX_PENDING_PER_USER: int = int(os.environ.get("PAYMENT_MAX_PENDING_PER_USER", "8"))
 
-# Почта для сброса пароля (опционально; иначе код уходит в Telegram, если есть привязка)
-SMTP_HOST: Optional[str] = os.environ.get("SMTP_HOST")
-SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "587"))
-SMTP_USER: Optional[str] = os.environ.get("SMTP_USER")
-SMTP_PASSWORD: Optional[str] = os.environ.get("SMTP_PASSWORD")
-SMTP_FROM: Optional[str] = os.environ.get("SMTP_FROM")
+# Почта: Unisender Go HTTP API (OTP, подтверждение, сброс пароля)
+UNISENDER_API_KEY: Optional[str] = (os.environ.get("UNISENDER_API_KEY") or "").strip() or None
+UNISENDER_API_URL: str = (
+    os.environ.get("UNISENDER_API_URL") or "https://go1.unisender.ru/ru/transactional/api/v1"
+).strip().rstrip("/")
+UNISENDER_FROM_NAME: str = (os.environ.get("UNISENDER_FROM_NAME") or "Зумерский VPN").strip()
+SMTP_FROM: Optional[str] = (os.environ.get("SMTP_FROM") or "").strip() or None
 
 POSTGRES_USER = os.getenv("POSTGRES_USER")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD")

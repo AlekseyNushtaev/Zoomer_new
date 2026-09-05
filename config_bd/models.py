@@ -71,6 +71,24 @@ class FirstSite(Base):
     field_bool_1 = Column(Boolean, default=False)
 
 
+class SecondSite(Base):
+    """Данные landing-сайта (OTP/Google), связь с users по tg_id (= users.user_id, от -50001)."""
+    __tablename__ = 'second_site'
+
+    id = Column(Integer, primary_key=True)
+    tg_id = Column(
+        BigInteger,
+        ForeignKey('users.user_id', ondelete='CASCADE'),
+        unique=True,
+        nullable=False,
+    )
+    email = Column(Text, nullable=True, unique=True)
+    google_sub = Column(String(255), nullable=True, unique=True)
+    activation_pass = Column(String(255), nullable=True)
+    site_url = Column(String(512), nullable=True)
+    verified = Column(Boolean, default=False)
+
+
 class WlTrafficMeta(Base):
     """Глобальное состояние учёта WL-трафика (одна строка id=1)."""
     __tablename__ = 'wl_traffic_meta'

@@ -266,6 +266,8 @@ async def _pay_site(
     payment_method: int,
     telegram_username: Optional[str] = None,
     payload_source: str = SITE,
+    return_url: Optional[str] = None,
+    failed_url: Optional[str] = None,
 ) -> Dict:
     if not await payment_creation_allowed(int(billing_user_id), telegram_username):
         return {"status": "rate_limited", "url": "", "id": ""}
@@ -291,6 +293,8 @@ async def _pay_site(
             description=des,
             payment_method=payment_method,
             payload=payload,
+            return_url=return_url or BOT_URL,
+            failed_url=failed_url or BOT_URL,
         )
         if payment_method == PLATEGA_SBP_METHOD:
             await sql.add_platega_payment(
@@ -327,11 +331,14 @@ async def pay_site_sbp(
     is_gift: bool,
     telegram_username: Optional[str] = None,
     payload_source: str = SITE,
+    return_url: Optional[str] = None,
+    failed_url: Optional[str] = None,
 ) -> Dict:
     """Оплата СБП Platega с сайта / subscription page."""
     return await _pay_site(
         val, des, payload_user, billing_user_id, duration, white, is_gift,
         PLATEGA_SBP_METHOD, telegram_username, payload_source,
+        return_url=return_url, failed_url=failed_url,
     )
 
 
@@ -345,11 +352,14 @@ async def pay_site_card(
     is_gift: bool,
     telegram_username: Optional[str] = None,
     payload_source: str = SITE,
+    return_url: Optional[str] = None,
+    failed_url: Optional[str] = None,
 ) -> Dict:
     """Оплата картой Platega с сайта / subscription page."""
     return await _pay_site(
         val, des, payload_user, billing_user_id, duration, white, is_gift,
         PLATEGA_CARD_METHOD, telegram_username, payload_source,
+        return_url=return_url, failed_url=failed_url,
     )
 
 

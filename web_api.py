@@ -4,10 +4,8 @@ import hmac
 import os
 import re
 import secrets
-import smtplib
 import string
 import time
-from email.mime.text import MIMEText
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Literal, Optional
 
@@ -35,11 +33,6 @@ from config import (
     PAYMENT_MAX_PENDING_PER_USER,
     PLATEGA_API_KEY,
     PLATEGA_MERCHANT_ID,
-    SMTP_FROM,
-    SMTP_HOST,
-    SMTP_PASSWORD,
-    SMTP_PORT,
-    SMTP_USER,
     SUB_PAGE_API_KEY,
     TG_TOKEN,
 )
@@ -49,6 +42,8 @@ from logging_config import logger
 from payments.payload_source import SITE, SUBPAGE
 from payments.pay_cryptobot import create_cryptobot_payment
 from payments.pay_platega import pay_site_card, pay_site_sbp
+from services.unisender import is_configured as unisender_configured
+from services.unisender import send_email as send_unisender_email
 from payments.pay_stars import get_stars_amount
 from wl_traffic.service import get_wl_used_gb_for_user
 import aiohttp
@@ -426,19 +421,9 @@ def _random_reset_code() -> str:
     return f"{secrets.randbelow(1_000_000):06d}"
 
 
-def _send_smtp_reset_email(to_email: str, code: str) -> None:
-    if not SMTP_HOST or not SMTP_FROM:
-        raise RuntimeError("SMTP not configured")
+async def _send_reset_email(to_email: str, code: str) -> None:
     body = f"Код для сброса пароля: {code}\n\nЕсли вы не запрашивали сброс, проигнорируйте письмо."
-    msg = MIMEText(body, "plain", "utf-8")
-    msg["Subject"] = "Сброс пароля"
-    msg["From"] = SMTP_FROM
-    msg["To"] = to_email
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as s:
-        if SMTP_USER and SMTP_PASSWORD:
-            s.starttls()
-            s.login(SMTP_USER, SMTP_PASSWORD)
-        s.send_message(msg)
+    await send_unisender_email(to_email=to_email, subject="Сброс пароля", text=body)
 
 
 class TelegramAuthIn(BaseModel):
@@ -636,20 +621,20 @@ async def _deliver_reset_code(email: str, code: str, row: tuple) -> None:
     tg: Optional[int] = None
     if row[1] is not None and int(row[1]) > 0:
         tg = int(row[1])
-    smtp_ok = False
-    if SMTP_HOST and SMTP_FROM:
+    email_ok = False
+    if unisender_configured():
         try:
-            await asyncio.to_thread(_send_smtp_reset_email, email, code)
-            smtp_ok = True
+            await _send_reset_email(email, code)
+            email_ok = True
         except Exception as e:
-            logger.warning("SMTP password reset failed: {}", e)
-    if not smtp_ok and tg is not None:
+            logger.warning("Unisender password reset failed: {}", e)
+    if not email_ok and tg is not None:
         try:
             await bot.send_message(tg, f"Код сброса пароля: {code}")
         except Exception as e:
             logger.warning("Telegram password reset failed: {}", e)
-    if not smtp_ok and tg is None:
-        logger.warning("Password reset code for {} not delivered (configure SMTP or Telegram)", email)
+    if not email_ok and tg is None:
+        logger.warning("Password reset code for {} not delivered (configure Unisender or Telegram)", email)
 
 
 @app.post("/api/auth/generate-telegram-token")
@@ -1381,30 +1366,20 @@ async def gift_activate_web(gift_id: str):
     }
 
 
-def _send_smtp_verification_email(to_email: str, code: str) -> None:
-    if not SMTP_HOST or not SMTP_FROM:
-        raise RuntimeError("SMTP not configured")
-    body = f"Ваш код подтверждения: {code}\n\nКод действителен 15 минут."
-    msg = MIMEText(body, "plain", "utf-8")
-    msg["Subject"] = "Подтверждение email — ZoomerVPN"
-    msg["From"] = SMTP_FROM
-    msg["To"] = to_email
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as s:
-        if SMTP_USER and SMTP_PASSWORD:
-            s.starttls()
-            s.login(SMTP_USER, SMTP_PASSWORD)
-        s.send_message(msg)
-
-
 async def _send_verification_code(email: str) -> str:
     code = _random_reset_code()
     expires = datetime.now(timezone.utc) + timedelta(minutes=15)
     activation_value = f"{code}:{int(expires.timestamp())}"
     await sql.set_activation_pass_by_email(email, activation_value)
+    body = f"Ваш код подтверждения: {code}\n\nКод действителен 15 минут."
     try:
-        await asyncio.to_thread(_send_smtp_verification_email, email, code)
+        await send_unisender_email(
+            to_email=email,
+            subject="Подтверждение email — ZoomerVPN",
+            text=body,
+        )
     except Exception as e:
-        logger.warning("SMTP verification email failed: {}", e)
+        logger.warning("Unisender verification email failed: {}", e)
     return code
 
 
@@ -1770,3 +1745,8 @@ async def partner_export_application_settings(
 
     items = await PartnerAppSQL().list_settings_export(bot_ids)
     return {"success": True, "count": len(items), "items": items}
+
+
+from landing_api import landing_router  # noqa: E402
+
+app.include_router(landing_router)
